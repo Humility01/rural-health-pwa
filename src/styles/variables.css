@@ -1,0 +1,24 @@
+/* Central design tokens tracking core branding guidelines */
+:root {
+  /* Primary Clinical Color Theme */
+  --primary-color: #0b7a4b;       /* Professional medical green */
+  --primary-hover: #085f3a;       /* Darker green for button hover actions */
+  --accent-color: #0284c7;        /* Clean sky blue for administrative items */
+  
+  /* Status Colors */
+  --status-online: #10b981;       /* Vibrant green for live network tracking */
+  --status-offline: #f59e0b;      /* Warning amber when local caching mode runs */
+  --error-color: #ef4444;         /* Destructive red for invalid validation bounds */
+
+  /* Neutrals for App Backgrounds */
+  --bg-main: #f8fafc;             /* Soft light grey background to prevent glare */
+  --bg-card: #ffffff;             /* Pure white background for clinical data panels */
+  --text-main: #0f172a;           /* Dark slate text for high legibility */
+  --text-muted: #64748b;          /* Soft grey for secondary detail subtitles */
+  --border-color: #cbd5e1;        /* Clean line separators for forms and tables */
+
+  /* Layout Spacing & Boundaries */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --font-main: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}

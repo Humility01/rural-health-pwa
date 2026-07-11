@@ -1,0 +1,17 @@
+{
+  "short_name": "RuralHealth",
+  "name": "RuralHealth Sync Core Platform",
+  "icons": [
+    {
+      "src": "old-manifest.json_bak",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#f8fafc",
+  "theme_color": "#1e3a8a",
+  "display": "standalone",
+  "orientation": "portrait"
+}
