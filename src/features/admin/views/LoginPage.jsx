@@ -42,8 +42,8 @@ export default function LoginPage({ onAuthSuccess }) {
       if (localMatch && (password === 'admin2000' || localMatch.password === password)) {
         setUiStatus({ text: 'Session authorized via Local Offline Node Cache...', type: 'SUCCESS' });
         
-        // 🛡️ COMMIT LOCAL SIGN IN AUDIT LOG TRAIL
-        await logSecurityEvent(localMatch.user_id, localMatch.email, 'LOGIN', 'Auth Module');
+        // 🛡️ FIXED: Passed arguments to correctly satisfy the 6-parameter logger setup
+        await logSecurityEvent(localMatch.user_id, localMatch.email, 'LOGIN', 'UserSession', localMatch.user_id, '127.0.0.1');
         
         if (onAuthSuccess) onAuthSuccess(localMatch);
         else await login(localMatch);
@@ -77,8 +77,8 @@ export default function LoginPage({ onAuthSuccess }) {
 
         setUiStatus({ text: 'Session authorized successfully. Loading...', type: 'SUCCESS' });
         
-        // 🛡️ COMMIT CLOUD FALLBACK SIGN IN AUDIT LOG TRAIL
-        await logSecurityEvent(userProfile.user_id, userProfile.email, 'LOGIN', 'Auth Module');
+        // 🛡️ FIXED: Passed arguments to correctly satisfy the 6-parameter logger setup
+        await logSecurityEvent(userProfile.user_id, userProfile.email, 'LOGIN', 'UserSession', userProfile.user_id, '127.0.0.1');
         
         if (onAuthSuccess) onAuthSuccess(userProfile);
         else await login(userProfile);
@@ -129,8 +129,8 @@ export default function LoginPage({ onAuthSuccess }) {
 
         setUiStatus({ text: 'Master SuperAdmin healthcare node initialized successfully!', type: 'SUCCESS' });
         
-        // 🛡️ COMMIT MASTER SUPERADMIN CREATION AUDIT LOG TRAIL
-        await logSecurityEvent(userPayload.user_id, userPayload.email, 'CREATE', 'Auth Module');
+        // 🛡️ FIXED: Aligned parameters to track SuperAdmin institutional node generation logs cleanly
+        await logSecurityEvent(userPayload.user_id, userPayload.email, 'CREATE', 'UserSession', userPayload.user_id, '127.0.0.1');
         
         if (onAuthSuccess) onAuthSuccess(userPayload);
         else await login(userPayload);
@@ -184,8 +184,8 @@ export default function LoginPage({ onAuthSuccess }) {
 
       setUiStatus({ text: 'Registration authorized! Your credentials have been registered into the operational node grid.', type: 'SUCCESS' });
       
-      // 🛡️ COMMIT STAFF PRE-AUTHORIZATION CLAIM CREATION AUDIT LOG TRAIL
-      await logSecurityEvent(userPayload.user_id, userPayload.email, 'CREATE', 'Auth Module');
+      // 🛡️ FIXED: Aligned parameters to pass data tracking sequences gracefully
+      await logSecurityEvent(userPayload.user_id, userPayload.email, 'CREATE', 'UserSession', userPayload.user_id, '127.0.0.1');
       
       if (onAuthSuccess) onAuthSuccess(userPayload);
       else await login(userPayload);
