@@ -124,7 +124,7 @@ export default function LoginPage({ onAuthSuccess }) {
         };
 
         await supabase.from('users').insert([userPayload]);
-        await localDb.facility.put(newFacility);
+        await localDb.facilities.put(newFacility);
         await localDb.users.put(userPayload);
 
         setUiStatus({ text: 'Master SuperAdmin healthcare node initialized successfully!', type: 'SUCCESS' });
