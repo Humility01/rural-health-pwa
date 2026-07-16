@@ -50,39 +50,106 @@ export default function AdminDashboard() {
 
   const refreshAdminDashboardCore = async () => {
     try {
-      // 1. Fetch Real-time Diagnostics Counts from updated ERD-compliant tables
-      const patientCount = await localDb.patients.count();
+      // 1. Fetch Diagnostics Counts from updated ERD-compliant tables
       const encounterCount = await localDb.visit.count(); // Switched to singular 'visit' table
       const pendingSyncCount = await localDb.sync_outbox.where('synced').equals(0).count();
 
-      setCachedProfilesCount(patientCount);
       setEncounterLogsCount(encounterCount);
       setOutboxCount(pendingSyncCount);
 
-      // 🌟 2. Fetch Facility Information Dynamically (Table 3.10 Implementation)
-      if (supabaseLive) {
+      // 🌟 2. Fetch Facility Information Dynamically from active LocalDB/Cloud context
+      let resolvedName = "Futminna Healthcare";
+      let resolvedLocation = "Minna, Niger State, Nigeria";
+      let resolvedId = currentFacilityId; // Default fallback ID
+
+      try {
+        // 🔄 FIXED: Fetch all cached users locally stored on this testing browser
+        const cachedUsers = await localDb.users.toArray();
+        
+        // Try parsing every possible session state token storage wrap used by your Auth provider
+        let activeEmail = "";
+        const storageKeys = ['user', 'session', 'active_user', 'supabase.auth.token'];
+        
+        for (const key of storageKeys) {
+          const rawItem = localStorage.getItem(key);
+          if (rawItem) {
+            try {
+              const parsed = JSON.parse(rawItem);
+              // Handle nested user objects from Supabase token storage structures
+              const emailCandidate = parsed.currentSession?.user?.email || parsed.user?.email || parsed.email;
+              if (emailCandidate) {
+                activeEmail = emailCandidate;
+                break;
+              }
+            } catch {
+              if (typeof rawItem === 'string' && rawItem.includes('@')) {
+                activeEmail = rawItem;
+                break;
+              }
+            }
+          }
+        }
+
+        // Find the exact row matching the current signed-in email
+        let activeUserRecord = null;
+        if (activeEmail) {
+          activeUserRecord = cachedUsers.find(u => u.email.trim().toLowerCase() === activeEmail.trim().toLowerCase());
+        }
+
+        // Forceful Fallback: If no exact email match is isolated, match by looking at who was added LAST
+        if (!activeUserRecord && cachedUsers.length > 0) {
+          activeUserRecord = cachedUsers[cachedUsers.length - 1];
+        }
+
+        if (activeUserRecord && activeUserRecord.facility_id) {
+          resolvedId = activeUserRecord.facility_id;
+          // Look up matching details from local facilities store
+          const matchedFacility = await localDb.facilities.get(activeUserRecord.facility_id);
+          if (matchedFacility) {
+            resolvedName = matchedFacility.facility_name || resolvedName;
+            resolvedLocation = matchedFacility.location || matchedFacility.facility_location || resolvedLocation;
+          }
+        }
+      } catch (localDbErr) {
+        console.warn("Could not query local IndexedDB facilities profile:", localDbErr);
+      }
+
+      // 🔄 FIXED: Query the exact facility_id instead of bypassing the filter checks
+      if (supabaseLive && resolvedId) {
         try {
           const { data: facilitiesList, error: facError } = await supabaseLive
             .from('facilities')
             .select('facility_name, location')
-            .limit(1);
+            .eq('facility_id', resolvedId)
+            .maybeSingle();
           
-          if (!facError && facilitiesList && facilitiesList.length > 0) {
-            setFacilityName(facilitiesList[0].facility_name);
-            setFacilityLocation(facilitiesList[0].location);
-          } else {
-            setFacilityName("Futminna Healthcare");
-            setFacilityLocation("Minna, Niger State, Nigeria");
+          if (!facError && facilitiesList) {
+            resolvedName = facilitiesList.facility_name || resolvedName;
+            resolvedLocation = facilitiesList.location || resolvedLocation;
+
+            // Seed local database cache so offline works perfectly on the next hot reload
+            await localDb.facilities.put({
+              facility_id: resolvedId,
+              facility_name: resolvedName,
+              location: resolvedLocation
+            });
           }
         } catch (netErr) {
           console.warn("Network offline. Displaying local facility cache identifiers:", netErr);
-          setFacilityName("Futminna Healthcare");
-          setFacilityLocation("Minna, Niger State, Nigeria");
         }
       }
 
-      // 3. Fetch Raw Table Arrays for the Registry Viewers
-      const patientsArray = await localDb.patients.toArray();
+      setFacilityName(resolvedName);
+      setFacilityLocation(resolvedLocation);
+
+      // 🌟 3. Fetch Raw Table Arrays for the Registry Viewers (Tenant-Isolated)
+      const allPatientsArray = await localDb.patients.toArray();
+      // Filter out only the profiles belonging to this active facility context
+      const patientsArray = allPatientsArray.filter(p => p.facility_id === resolvedId);
+      
+      // Sync metric badge count card to show facility-isolated totals
+      setCachedProfilesCount(patientsArray.length);
+
       const rawVisitsArray = await localDb.visit.toArray(); // Switched to singular 'visit' table
       
       // Fetch unsynced local outbox rows for our structural queue viewer
@@ -105,21 +172,82 @@ export default function AdminDashboard() {
       setLocalPatients(patientsArray);
       setLocalEncounters(compiledEncountersArray);
 
-      // 4. Fetch Active Staff Account Registry Matrix
-      const users = await localDb.users.toArray();
-      setSystemUsers(users);
+      // 🌟 4. Fetch Active Staff Account Registry Matrix (Filtered by Facility ID)
+      const allUsers = await localDb.users.toArray();
+      
+      // Filter out only the staff members that belong to this specific logged-in facility node
+      const filteredUsers = allUsers.filter(user => user.facility_id === resolvedId);
+      
+      setSystemUsers(filteredUsers);
+      
     } catch (err) {
       console.error("Critical error hydrating administrative database collections:", err);
     }
   };
 
-  // --- FETCH LIVE AUDIT LOGS FROM SUPABASE ---
+  // =========================================================================
+  // 🛡️ --- FETCH LIVE AUDIT LOGS FROM SUPABASE (TENANT-ISOLATED) ---
+  // =========================================================================
   const fetchLiveAuditLogs = async () => {
     try {
       setLoadingAudit(true);
+      
+      // 1. Isolate the active logged-in user context to extract their facility identifier
+      let resolvedId = null;
+      try {
+        const cachedUsers = await localDb.users.toArray();
+        let activeEmail = "";
+        const storageKeys = ['user', 'session', 'active_user', 'supabase.auth.token'];
+        
+        for (const key of storageKeys) {
+          const rawItem = localStorage.getItem(key);
+          if (rawItem) {
+            try {
+              const parsed = JSON.parse(rawItem);
+              const emailCandidate = parsed.currentSession?.user?.email || parsed.user?.email || parsed.email;
+              if (emailCandidate) {
+                activeEmail = emailCandidate;
+                break;
+              }
+            } catch {
+              if (typeof rawItem === 'string' && rawItem.includes('@')) {
+                activeEmail = rawItem;
+                break;
+              }
+            }
+          }
+        }
+
+        let activeUserRecord = null;
+        if (activeEmail) {
+          activeUserRecord = cachedUsers.find(u => u.email.trim().toLowerCase() === activeEmail.trim().toLowerCase());
+        }
+        if (!activeUserRecord && cachedUsers.length > 0) {
+          activeUserRecord = cachedUsers[cachedUsers.length - 1];
+        }
+        resolvedId = activeUserRecord?.facility_id;
+      } catch (e) {
+        console.warn("Could not isolate active facility ID for audit trail:", e);
+      }
+
+      // 2. Fetch user_ids for staff members registered under this facility node
+      const localStaff = await localDb.users.toArray();
+      const tenantStaffIds = localStaff
+        .filter(u => u.facility_id === resolvedId)
+        .map(u => u.user_id);
+
+      // Early layout escape path if zero local operator entries match
+      if (tenantStaffIds.length === 0) {
+        setAuditLogs([]);
+        setLoadingAudit(false);
+        return;
+      }
+
+      // 3. Assemble filtered cloud database fetch payload queries
       let query = supabaseLive
         .from('audit_log')
         .select('*')
+        .in('user_id', tenantStaffIds) // 🔒 Security Gate: Confines lookups strictly to tenant operators
         .order('timestamp', { ascending: false });
 
       if (filterAction) {
@@ -256,32 +384,69 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleRequestFacilityDeletion = async () => {
-    if (!window.confirm("🚨 WHATSAPP-STYLE ACCOUNT DESTRUCTION NOTICE:\n\nAre you absolutely certain you want to schedule this complete healthcare facility for deletion? This will instantly wipe all patient files from this machine and trigger a 21-day destruction countdown in the cloud database layers.")) {
+const handleRequestFacilityDeletion = async () => {
+    if (!window.confirm("🚨 Are you absolutely certain you want to schedule this complete healthcare facility for deletion? This will instantly wipe all patient files from this machine and trigger a 21-day destruction countdown in the cloud database layers.")) {
       return;
     }
 
     try {
       const destructionDate = new Date();
       destructionDate.setDate(destructionDate.getDate() + 21);
-      const masterUser = await localDb.users.where('role').equals('SUPER_ADMIN').first();
       
-      if (supabaseLive && masterUser) {
-        const { data: facilitiesList } = await supabaseLive.from('facilities').select('facility_id').limit(1);
-        const activeFacilityId = facilitiesList?.[0]?.facility_id;
-
-        if (activeFacilityId) {
-          const { error } = await supabaseLive
-            .from('facilities')
-            .update({
-              status: 'PENDING_PURGE',
-              purge_target_at: destructionDate.toISOString(),
-              requested_by: masterUser.email
-            })
-            .eq('facility_id', activeFacilityId);
-
-          if (error) throw error;
+      //  FIXED: Retrieve the active logged-in email directly from localStorage session parsing
+      let activeSessionEmail = "";
+      let resolvedId = null;
+      
+      try {
+        const cachedUsers = await localDb.users.toArray();
+        const storageKeys = ['user', 'session', 'active_user', 'supabase.auth.token'];
+        
+        for (const key of storageKeys) {
+          const rawItem = localStorage.getItem(key);
+          if (rawItem) {
+            try {
+              const parsed = JSON.parse(rawItem);
+              const emailCandidate = parsed.currentSession?.user?.email || parsed.user?.email || parsed.email;
+              if (emailCandidate) {
+                activeSessionEmail = emailCandidate.trim().toLowerCase();
+                break;
+              }
+            } catch {
+              if (typeof rawItem === 'string' && rawItem.includes('@')) {
+                activeSessionEmail = rawItem.trim().toLowerCase();
+                break;
+              }
+            }
+          }
         }
+
+        if (activeSessionEmail) {
+          const activeUserRecord = cachedUsers.find(u => u.email.trim().toLowerCase() === activeSessionEmail);
+          resolvedId = activeUserRecord?.facility_id;
+        }
+      } catch (e) {
+        console.warn("Could not isolate active facility ID or active email for targeted deletion:", e);
+      }
+
+      // Fallback in case local session parsing failed to find the active user
+      if (!activeSessionEmail) {
+        const fallbackUser = await localDb.users.where('role').equals('SUPER_ADMIN').first();
+        activeSessionEmail = fallbackUser?.email || "unknown_admin@gmail.com";
+        resolvedId = resolvedId || fallbackUser?.facility_id;
+      }
+
+      // 🔒 Strict safety gate: enforce the matching facility constraint check and stamp the active email
+      if (supabaseLive && resolvedId) {
+        const { error } = await supabaseLive
+          .from('facilities')
+          .update({
+            status: 'PENDING_PURGE',
+            purge_target_at: destructionDate.toISOString(),
+            requested_by: activeSessionEmail // 🌟 FIXED: Writes the exact session email instead of Dexie's first match
+          })
+          .eq('facility_id', resolvedId); 
+
+        if (error) throw error;
       }
 
       await localDb.visit.clear();
@@ -292,7 +457,7 @@ export default function AdminDashboard() {
       await localDb.patients.clear();
       await localDb.sync_outbox.clear();
 
-      alert("📱 Facility Destruction Initialized Successfully!\nLocal client caches cleared. The cloud server will fully purge all backup metrics in 21 days unless manually aborted by a SuperAdmin.");
+      alert(" Facility Destruction Initialized Successfully!\nLocal client caches cleared. The cloud server will fully purge all backup metrics in 21 days unless manually aborted by a SuperAdmin.");
       localStorage.clear();
       window.location.reload();
     } catch (err) {
@@ -473,7 +638,7 @@ export default function AdminDashboard() {
           {/* ACTIVE STAFF REGISTRY BLOCK */}
           <div className="panel-card">
             <h3 style={{ margin: '0 0 14px 0', fontSize: '14px', fontWeight: '800', color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-               Active System Operators Registry
+                Active System Operators Registry
             </h3>
             <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
@@ -518,14 +683,14 @@ export default function AdminDashboard() {
           <div className="panel-card" style={{ background: '#fff1f2', border: '1px solid #ffe4e6', display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <h4 style={{ margin: '0', color: '#991b1b', fontSize: '13px', fontWeight: '800', letterSpacing: '0.25px' }}>⚠️ SYSTEM DESTRUCTION VAULT</h4>
             <p style={{ margin: '0', fontSize: '12px', color: '#9f1239', lineHeight: '1.5', fontWeight: '500' }}>
-              Wipe local diagnostic database tables immediately or schedule this entire facility for a permanent 21-day network erasure.
+              Wipe local database tables immediately or schedule this entire facility for a permanent 21-day network erasure.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '4px' }}>
               <button onClick={handleWipeDatabaseCache} style={{ width: '100%', padding: '10px 14px', background: '#ffffff', border: '1px solid #dc2626', color: '#dc2626', borderRadius: '8px', fontWeight: '700', cursor: 'pointer', fontSize: '12px', fontFamily: '"Montserrat", sans-serif' }}>
                  Wipe Local Database Cache
               </button>
               <button onClick={handleRequestFacilityDeletion} style={{ width: '100%', padding: '10px 14px', background: '#dc2626', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '700', cursor: 'pointer', fontSize: '12px', fontFamily: '"Montserrat", sans-serif' }}>
-                  Request Total Facility Deletion (21-Day Grace)
+                 Request Total Facility Deletion (21-Day Grace)
               </button>
             </div>
           </div>
@@ -566,7 +731,7 @@ export default function AdminDashboard() {
                   color: activeTab === 'audit-logs' ? '#004bf6' : '#475569' 
                 }}
               >
-                 Security Logs
+                  Security Logs
               </button>
               <button 
                 onClick={() => setActiveTab('sync-outbox')} 
@@ -580,7 +745,7 @@ export default function AdminDashboard() {
               </button>
             </div>
             <button onClick={refreshAdminDashboardCore} style={{ background: '#ffffff', border: '1px solid #cbd5e1', padding: '10px 14px', borderRadius: '10px', fontSize: '12px', fontWeight: '700', color: '#334155', cursor: 'pointer', fontFamily: '"Montserrat", sans-serif', display: 'flex', alignItems: 'center', gap: '6px' }}>
-               Refresh
+                Refresh
             </button>
           </div>
 

@@ -14,10 +14,17 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const initializeSession = async () => {
       try {
-        // 1. First attempt to restore local disk storage cache
-        const cachedSession = localStorage.getItem('active_session_user');
+        // 1. First attempt to restore local disk storage cache using the unified key
+        const cachedSession = localStorage.getItem('active_session_user') || localStorage.getItem('user');
         if (cachedSession) {
-          setCurrentUser(JSON.parse(cachedSession));
+          try {
+            setCurrentUser(JSON.parse(cachedSession));
+          } catch {
+            // Fallback if it's a plain email string
+            if (typeof cachedSession === 'string' && cachedSession.includes('@')) {
+              await syncCloudUserToContext(cachedSession);
+            }
+          }
         }
 
         // 2. Safely query Supabase for active network tokens to confirm cloud sessions
@@ -42,6 +49,8 @@ export function AuthProvider({ children }) {
         // Clean state parameters if session explicitly signs out or expires
         setCurrentUser(null);
         localStorage.removeItem('active_session_user');
+        localStorage.removeItem('user');
+        localStorage.removeItem('active_user');
       }
     });
 
@@ -63,6 +72,8 @@ export function AuthProvider({ children }) {
         };
         setCurrentUser(sessionData);
         localStorage.setItem('active_session_user', JSON.stringify(sessionData));
+        localStorage.setItem('user', JSON.stringify(sessionData));
+        localStorage.setItem('active_user', localMatch.email);
       }
     } catch (e) {
       console.warn("Mismatched database tables context sync bypass:", e);
@@ -82,6 +93,8 @@ export function AuthProvider({ children }) {
       };
       setCurrentUser(sessionData);
       localStorage.setItem('active_session_user', JSON.stringify(sessionData));
+      localStorage.setItem('user', JSON.stringify(sessionData));
+      localStorage.setItem('active_user', userProfile.email);
       return { success: true, role: userProfile.role };
     }
 
@@ -105,10 +118,13 @@ export function AuthProvider({ children }) {
           const sessionData = { 
             user_id: localGoogleUser.user_id, 
             email: localGoogleUser.email, 
-            role: localGoogleUser.role 
+            role: localGoogleUser.role,
+            facility_id: localGoogleUser.facility_id 
           };
           setCurrentUser(sessionData);
           localStorage.setItem('active_session_user', JSON.stringify(sessionData));
+          localStorage.setItem('user', JSON.stringify(sessionData));
+          localStorage.setItem('active_user', localGoogleUser.email);
           return { success: true, role: localGoogleUser.role };
         }
       } catch (dbErr) {
@@ -131,6 +147,8 @@ export function AuthProvider({ children }) {
           };
           setCurrentUser(sessionData);
           localStorage.setItem('active_session_user', JSON.stringify(sessionData));
+          localStorage.setItem('user', JSON.stringify(sessionData));
+          localStorage.setItem('active_user', localMatch.email);
           return { success: true, role: localMatch.role };
         } else {
           throw new Error('Access Denied: Invalid passcode token match for this device node.');
@@ -142,7 +160,7 @@ export function AuthProvider({ children }) {
     }
 
     // =========================================================================
-    // 💻 LAYER 3: HARDCODED ROOT INITIALIZATION DEVICE FALLBACK (Updated to admin2000)
+    // 3. HARDCODED ROOT INITIALIZATION DEVICE FALLBACK (Updated to admin2000)
     // =========================================================================
     if (cleanEmail === 'humilitypraise1057@gmail.com' && password === 'admin2000') {
       const adminSession = { 
@@ -153,6 +171,8 @@ export function AuthProvider({ children }) {
       };
       setCurrentUser(adminSession);
       localStorage.setItem('active_session_user', JSON.stringify(adminSession));
+      localStorage.setItem('user', JSON.stringify(adminSession));
+      localStorage.setItem('active_user', cleanEmail);
       
       try {
         if (localDb && localDb.users) {
@@ -171,13 +191,17 @@ export function AuthProvider({ children }) {
     throw new Error('Authentication Rejected: Unauthorized credentials or unprovisioned node cache.');
   };
 
-  // Logout routine handling state scrubbing
+  // Logout routine handling state scrubbing completely
   const logout = async () => {
     try {
       await supabase.auth.signOut();
     } catch (e) {}
     setCurrentUser(null);
+    
+    // 🌟 FIXED: Wipes every token variable clean so accounts never cross names during single-browser switches
     localStorage.removeItem('active_session_user');
+    localStorage.removeItem('user');
+    localStorage.removeItem('active_user');
     localStorage.removeItem('ACTIVE_OPERATOR_TOKEN');
   };
 

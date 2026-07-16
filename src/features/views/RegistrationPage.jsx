@@ -49,6 +49,75 @@ export default function RegistrationPage() {
     }
 
     setSubmitting(true);
+
+    // =========================================================================
+    // 🌟 SEED SESSION CONTEXT TO RESOLVE ACTIVE CLINIC FACILITY_ID
+    // =========================================================================
+    let activeFacilityId = null;
+    let operatorEmail = 'Field Nurse';
+    let operatorId = null;
+
+    try {
+      const cachedUsers = await localDb.users.toArray();
+      const storageKeys = ['user', 'session', 'active_user', 'active_session_user', 'supabase.auth.token'];
+      let sessionData = null;
+
+      for (const key of storageKeys) {
+        const rawItem = localStorage.getItem(key);
+        if (rawItem) {
+          try {
+            const parsed = JSON.parse(rawItem);
+            const userObj = parsed.currentSession?.user || parsed.user || parsed;
+            if (userObj?.email) {
+              sessionData = userObj;
+              break;
+            }
+          } catch {
+            if (rawItem.includes('@')) {
+              operatorEmail = rawItem;
+            }
+          }
+        }
+      }
+
+      if (sessionData && sessionData.email) {
+        operatorEmail = sessionData.email;
+        operatorId = sessionData.id || sessionData.user_id || null;
+      } else {
+        const localUsers = await localDb.users.toArray();
+        const activeSessionNode = localUsers.find(u => u.is_active === 1 || u.password !== '');
+        if (activeSessionNode) {
+          operatorEmail = activeSessionNode.email;
+          operatorId = activeSessionNode.user_id;
+        } else if (localUsers.length > 0) {
+          const fallbackNode = localUsers[localUsers.length - 1];
+          operatorEmail = fallbackNode.email;
+          operatorId = fallbackNode.user_id;
+        }
+      }
+
+      // Isolate matching database row to lock down exact facility_id mapping
+      let activeUserRecord = null;
+      if (operatorEmail && operatorEmail !== 'Field Nurse') {
+        activeUserRecord = cachedUsers.find(u => u.email.trim().toLowerCase() === operatorEmail.trim().toLowerCase());
+      }
+      
+      activeFacilityId = activeUserRecord?.facility_id || cachedUsers[cachedUsers.length - 1]?.facility_id || '00000000-0000-0000-0000-000000000000';
+    } catch (sessionErr) {
+      console.warn("Automated audit and facility stream extraction bypassed:", sessionErr);
+    }
+
+    if (!operatorId) {
+      try {
+        const firstValidUser = await localDb.users.toCollection().first();
+        if (firstValidUser) {
+          operatorId = firstValidUser.user_id;
+          if (operatorEmail === 'Field Nurse') operatorEmail = firstValidUser.email;
+          if (!activeFacilityId || activeFacilityId === '00000000-0000-0000-0000-000000000000') activeFacilityId = firstValidUser.facility_id;
+        }
+      } catch (dbErr) { console.error(dbErr); }
+    }
+
     const newPatientId = crypto.randomUUID();
     const generatedBarcodeId = `RURAL-${Math.floor(100000 + Math.random() * 900000)}`;
     const timestamp = new Date().toISOString();
@@ -63,6 +132,7 @@ export default function RegistrationPage() {
       phone: phone.trim() || null,
       address: address.trim() || null,
       barcode_id: generatedBarcodeId,
+      facility_id: activeFacilityId, // 🔒 FIXED: Patient row linked strictly to this context node
       created_at: timestamp,
       updated_at: timestamp
     };
@@ -108,68 +178,6 @@ export default function RegistrationPage() {
           created_at: timestamp,
           synced: 0
         });
-      }
-
-      // 🛡️ SECURITY AUDIT AUTOMATIC SESSION INTERCEPT ENGINE
-      let operatorEmail = 'Field Nurse';
-      let operatorId = null;
-
-      try {
-        // 1. Check all potential LocalStorage slots for active profile payload strings
-        const storageKeys = ['user', 'session', 'supabase.auth.token', 'active_user'];
-        let sessionData = null;
-
-        for (const key of storageKeys) {
-          const rawItem = localStorage.getItem(key);
-          if (rawItem) {
-            try {
-              const parsed = JSON.parse(rawItem);
-              // Handle Supabase default auth session indexing depth wraps nested inside current object
-              const userObj = parsed.currentSession?.user || parsed.user || parsed;
-              if (userObj?.email) {
-                sessionData = userObj;
-                break;
-              }
-            } catch {
-              if (rawItem.includes('@')) {
-                operatorEmail = rawItem;
-              }
-            }
-          }
-        }
-
-        if (sessionData && sessionData.email) {
-          operatorEmail = sessionData.email;
-          operatorId = sessionData.id || sessionData.user_id || null;
-        } else {
-          // 2. LocalDB Scan Fallback: Extract the user account based on active system parameters
-          const localUsers = await localDb.users.toArray();
-          
-          // Look for any logged-in row context parameters
-          const activeSessionNode = localUsers.find(u => u.is_active === 1 || u.password !== '');
-          if (activeSessionNode) {
-            operatorEmail = activeSessionNode.email;
-            operatorId = activeSessionNode.user_id;
-          } else if (localUsers.length > 0) {
-            // Pick the latest authentic user matching structural rules
-            const fallbackNode = localUsers[localUsers.length - 1];
-            operatorEmail = fallbackNode.email;
-            operatorId = fallbackNode.user_id;
-          }
-        }
-      } catch (sessionErr) {
-        console.warn("Automated audit stream extraction bypassed:", sessionErr);
-      }
-
-      // 3. Fallback Validation check against our strict database foreign key constraint
-      if (!operatorId) {
-        try {
-          const firstValidUser = await localDb.users.toCollection().first();
-          if (firstValidUser) {
-            operatorId = firstValidUser.user_id;
-            if (operatorEmail === 'Field Nurse') operatorEmail = firstValidUser.email;
-          }
-        } catch (dbErr) { console.error(dbErr); }
       }
 
       // Fire security vector trail straight to Supabase instance channels

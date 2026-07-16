@@ -31,15 +31,41 @@ export default function SearchPage() {
   // --- 🌟 NEW: Hook to Fetch Clinic Name for Printed Assets dynamically ---
   useEffect(() => {
     const fetchClinicNameForPrint = async () => {
+      // Isolate current user context to query the explicit matching clinic name row
+      let resolvedId = null;
+      try {
+        const cachedUsers = await localDb.users.toArray();
+        const rawSession = localStorage.getItem('user') || localStorage.getItem('session') || localStorage.getItem('active_session_user') || '{}';
+        let activeEmail = '';
+        try {
+          const parsed = JSON.parse(rawSession);
+          const userObj = parsed.currentSession?.user || parsed.user || parsed;
+          if (userObj?.email) activeEmail = userObj.email;
+        } catch {
+          if (typeof rawSession === 'string' && rawSession.includes('@')) activeEmail = rawSession;
+        }
+        
+        const activeUserRecord = cachedUsers.find(u => u.email.trim().toLowerCase() === String(activeEmail || '').trim().toLowerCase());
+        resolvedId = activeUserRecord?.facility_id || cachedUsers[cachedUsers.length - 1]?.facility_id;
+        
+        if (resolvedId) {
+          const matchedFacility = await localDb.facilities.get(resolvedId);
+          if (matchedFacility?.facility_name) {
+            setPrintFacilityName(matchedFacility.facility_name.toUpperCase());
+            return;
+          }
+        }
+      } catch (e) { console.warn(e); }
+
       if (supabaseLive) {
         try {
-          const { data: facilitiesList, error: facError } = await supabaseLive
-            .from('facilities')
-            .select('facility_name')
-            .limit(1);
+          let query = supabaseLive.from('facilities').select('facility_name');
+          if (resolvedId) {
+            query = query.eq('facility_id', resolvedId);
+          }
+          const { data: facilitiesList, error: facError } = await query.limit(1);
 
           if (!facError && facilitiesList && facilitiesList.length > 0) {
-            // Transform to clear uppercase string for institutional medical records
             setPrintFacilityName(facilitiesList[0].facility_name.toUpperCase());
           } else {
             setPrintFacilityName('FUTMINNA HEALTHCARE');
@@ -52,7 +78,7 @@ export default function SearchPage() {
     };
 
     fetchClinicNameForPrint();
-  }, []);
+  }, [selectedPatient]);
 
   const getStatusTheme = () => {
     switch (status.type) {
@@ -87,6 +113,9 @@ export default function SearchPage() {
     };
   };
 
+  // =========================================================================
+  // 🔍 TENANT-ISOLATED CORE RETRIEVAL SEARCH LOOP
+  // =========================================================================
   const handleSearch = async (e) => {
     e.preventDefault();
     setStatus({ text: '', type: '' });
@@ -105,6 +134,31 @@ export default function SearchPage() {
 
     setSearching(true);
     try {
+      // 🌟 Isolate the current user session context to locate the active facility_id
+      let activeFacilityId = null;
+      try {
+        const cachedUsers = await localDb.users.toArray();
+        const rawSession = localStorage.getItem('user') || localStorage.getItem('session') || localStorage.getItem('active_session_user') || '{}';
+        let activeEmail = '';
+        
+        try {
+          const parsed = JSON.parse(rawSession);
+          const userObj = parsed.currentSession?.user || parsed.user || parsed;
+          if (userObj?.email) activeEmail = userObj.email;
+        } catch {
+          if (typeof rawSession === 'string' && rawSession.includes('@')) activeEmail = rawSession;
+        }
+
+        let activeUserRecord = null;
+        if (activeEmail) {
+          activeUserRecord = cachedUsers.find(u => u.email.trim().toLowerCase() === activeEmail.trim().toLowerCase());
+        }
+
+        activeFacilityId = activeUserRecord?.facility_id || cachedUsers[cachedUsers.length - 1]?.facility_id;
+      } catch (sessionErr) {
+        console.warn("Session isolation tracking bypassed:", sessionErr);
+      }
+
       let records = [];
 
       if (cleanQuery.toUpperCase().startsWith('RURAL-')) {
@@ -112,17 +166,31 @@ export default function SearchPage() {
           .where('barcode_id')
           .equalsIgnoreCase(cleanQuery)
           .first();
-        if (match) records = [match];
+          
+        if (match) {
+          // 🔒 SECURITY GATE check: Intercept cross-clinic database views instantly
+          if (match.facility_id && match.facility_id !== activeFacilityId) {
+            setStatus({ text: '❌ Security Access Denied: This patient profile belongs to a separate healthcare node.', type: 'ERROR' });
+            setSearchResults([]);
+            setSearching(false);
+            return;
+          }
+          records = [match];
+        }
       } else {
         const queryLower = cleanQuery.toLowerCase();
-        records = await localDb.patients
-          .filter(patient => 
+        const allPatients = await localDb.patients.toArray();
+        
+        // 🔒 SECURITY FILTER: Restrict text searches solely to current logged-in station data boundaries
+        records = allPatients.filter(patient => 
+          patient.facility_id === activeFacilityId && (
             patient.first_name.toLowerCase().includes(queryLower) ||
             patient.last_name.toLowerCase().includes(queryLower)
           )
-          .toArray();
+        );
       }
 
+      // Cloud Fallback Retrieval Gate
       if (records.length === 0 && cleanQuery.toUpperCase().startsWith('RURAL-') && supabaseLive) {
         setStatus({ text: '🔍 Cache Miss: Scanning permanent Supabase cloud infrastructure...', type: 'PENDING' });
         const targetBarcode = cleanQuery.toUpperCase().trim();
@@ -134,6 +202,14 @@ export default function SearchPage() {
           .maybeSingle();
 
         if (cloudPatient) {
+          // 🔒 CLOUD PRIVACY CHECK: Verify retrieved data points don't point to external system indices
+          if (cloudPatient.facility_id && cloudPatient.facility_id !== activeFacilityId) {
+            setStatus({ text: '❌ Security Access Denied: This patient profile belongs to a separate healthcare node.', type: 'ERROR' });
+            setSearchResults([]);
+            setSearching(false);
+            return;
+          }
+
           await localDb.patients.put(cloudPatient);
           records = [cloudPatient];
 
@@ -427,7 +503,6 @@ export default function SearchPage() {
       {selectedPatient && (
         <div id="printable-id-pass-container">
           <div style={{ borderBottom: '1.5px solid #004bf6', paddingBottom: '1.5mm', marginBottom: '2mm', display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-            {/*  OPTIMIZED: Hardcoded text swapped with dynamic uppercase state variable */}
             <span style={{ fontSize: '9px', fontWeight: '900', color: '#004bf6', textTransform: 'uppercase' }}>
               NIGERIA {printFacilityName} SECURITY PASS
             </span>
@@ -445,13 +520,12 @@ export default function SearchPage() {
         <div id="printable-history-report">
           <div style={{ borderBottom: '3px solid #004bf6', paddingBottom: '4mm', marginBottom: '6mm', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
             <div>
-              {/* 🌟 OPTIMIZED: Hardcoded text swapped with dynamic uppercase state variable */}
               <h1 style={{ fontSize: '22px', fontWeight: '900', color: '#004bf6', margin: 0, textTransform: 'uppercase' }}>
                 {printFacilityName} HEALTHCARE INFRASTRUCTURE
               </h1>
               <span style={{ fontSize: '12px', color: '#475569' }}>Official Patient Treatment Sheet Log Ledger</span>
             </div>
-            <div style={{ textAlign: 'right', fontSize: '11px', color: '#64748b' }}>Date Printed: {new Date().toLocaleDateString()}</div>
+            <div style={{ textHex: 'right', fontSize: '11px', color: '#64748b' }}>Date Printed: {new Date().toLocaleDateString()}</div>
           </div>
           {globalHistory.map((visit) => (
             <div key={visit.visit_id} className="report-visit-row">
@@ -476,7 +550,7 @@ export default function SearchPage() {
       {/* --- EDIT PROFILE POP-UP OVERLAY LAYER --- */}
       {isEditing && (
         <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15, 23, 42, 0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px', boxSizing: 'border-box' }}>
-          <div style={{ background: '#ffffff', width: '100%', max_width: '480px', borderRadius: '16px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', boxSizing: 'border-box' }}>
+          <div style={{ background: '#ffffff', width: '100%', maxWidth: '480px', borderRadius: '16px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', boxSizing: 'border-box' }}>
             <h3 style={{ margin: '0 0 16px 0', color: '#004bf6', fontSize: '18px', fontWeight: '800' }}>Modify Patient Core Profile</h3>
             <form onSubmit={handleUpdatePatientProfile} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
