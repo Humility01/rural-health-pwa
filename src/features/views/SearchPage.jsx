@@ -171,7 +171,7 @@ export default function SearchPage() {
           // 🔒 SECURITY GATE check: Intercept cross-clinic database views instantly
           if (match.facility_id && match.facility_id !== activeFacilityId) {
             setStatus({ text: '❌ Security Access Denied: This patient profile belongs to a separate healthcare node.', type: 'ERROR' });
-            setSearchResults([]);
+            boxSearchResults([]);
             setSearching(false);
             return;
           }
@@ -474,6 +474,20 @@ export default function SearchPage() {
         }
         .vault-button:hover { background: #003cd1; }
         
+        /* 📱 RESPONSIVE INTERACTION VIEWPORT STYLES */
+        .search-matrix-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 24px;
+          margin-top: 24px;
+        }
+
+        @media (max-width: 1024px) {
+          .search-matrix-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        
         #printable-id-pass-container, #printable-history-report { display: none !important; }
 
         @media print {
@@ -539,7 +553,7 @@ export default function SearchPage() {
                 <div>🩺 <strong>BP:</strong> {visit.blood_pressure}</div>
                 <div>💓 <strong>Pulse:</strong> {visit.heart_rate} bpm</div>
               </div>
-              <div style={{ fontSize: '13px', margin: '6px 0' }}><strong>Presenting Complaint:</strong> {visit.presenting_complaint}</div>
+              <div style={{ fontSize: '13px', margin: '6px 0' }}><strong>Presenting Complaint:</strong> {visit.presenting_complaint} ({visit.duration_days})</div>
               <div style={{ fontSize: '13px', margin: '4px 0', color: '#004bf6', fontWeight: '700' }}>Assessment Diagnosis: {visit.diagnosis_notes}</div>
               <div style={{ fontSize: '13px', marginTop: '6px', background: '#f1f5f9', padding: '8px' }}>💊 <strong>Prescribed Medications:</strong> {visit.treatment_plan}</div>
             </div>
@@ -587,8 +601,8 @@ export default function SearchPage() {
         </div>
       )}
 
-      {/* VIEWPORT FRAMEWORK LAYER */}
-      <div className="no-print" style={{ display: 'grid', gridTemplateColumns: selectedPatient ? '1fr 1fr' : '1fr', gap: '24px', marginTop: '24px' }}>
+      {/* 🌟 VIEWPORT FRAMEWORK LAYER (RESPONSIVE GRID CLASS LINKED) */}
+      <div className="no-print search-matrix-grid" style={{ gridTemplateColumns: selectedPatient ? '1fr 1fr' : '1fr' }}>
         
         {/* LEFT HUB RETRIEVAL PANEL */}
         <div style={{ background: '#ffffff', padding: '28px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)', height: 'fit-content' }}>

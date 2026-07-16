@@ -63,7 +63,7 @@ export default function AdminDashboard() {
       let resolvedId = currentFacilityId; // Default fallback ID
 
       try {
-        // 🔄 FIXED: Fetch all cached users locally stored on this testing browser
+        // 🔄 FETCH: Fetch all cached users locally stored on this testing browser
         const cachedUsers = await localDb.users.toArray();
         
         // Try parsing every possible session state token storage wrap used by your Auth provider
@@ -114,7 +114,7 @@ export default function AdminDashboard() {
         console.warn("Could not query local IndexedDB facilities profile:", localDbErr);
       }
 
-      // 🔄 FIXED: Query the exact facility_id instead of bypassing the filter checks
+      // 🔄 Query the exact facility_id instead of bypassing the filter checks
       if (supabaseLive && resolvedId) {
         try {
           const { data: facilitiesList, error: facError } = await supabaseLive
@@ -384,7 +384,7 @@ export default function AdminDashboard() {
     }
   };
 
-const handleRequestFacilityDeletion = async () => {
+  const handleRequestFacilityDeletion = async () => {
     if (!window.confirm("🚨 Are you absolutely certain you want to schedule this complete healthcare facility for deletion? This will instantly wipe all patient files from this machine and trigger a 21-day destruction countdown in the cloud database layers.")) {
       return;
     }
@@ -523,6 +523,35 @@ const handleRequestFacilityDeletion = async () => {
           font-family: "Montserrat", sans-serif; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s ease;
         }
         .badge-container { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+        
+        /* 📱 RESPONSIVE LAYOUT MATRIX */
+        .metrics-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 20px;
+        }
+        .dashboard-grid {
+          display: grid;
+          grid-template-columns: 1.1fr 1.4fr;
+          gap: 24px;
+        }
+
+        /* 📟 Screen sizes smaller than 1024px (Tablets & Landscape Mobile) */
+        @media (max-width: 1024px) {
+          .metrics-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          .dashboard-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        /* 📱 Screen sizes smaller than 640px (Portrait Mobile Devices) */
+        @media (max-width: 640px) {
+          .metrics-grid {
+            grid-template-columns: 1fr;
+          }
+        }
       `}</style>
       
       {/* 🌟 DYNAMIC HEADER BLOCK INTEGRATION (Table 3.10 Layout Mapping) */}
@@ -535,8 +564,8 @@ const handleRequestFacilityDeletion = async () => {
         </p>
       </div>
 
-      {/* METRIC MATRIX ROW */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '20px' }}>
+      {/* 🌟 METRIC MATRIX ROW (RESPONSIVE CONFIGURATION ENABLED) */}
+      <div className="metrics-grid">
         
         {/* TOTAL PATIENTS METRIC CARD */}
         <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -601,8 +630,8 @@ const handleRequestFacilityDeletion = async () => {
         </div>
       )}
 
-      {/* TWO COLUMN CONTENT INTERACTION MATRIX */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.4fr', gap: '24px' }}>
+      {/* 🌟 TWO COLUMN CONTENT INTERACTION MATRIX (RESPONSIVE CONFIGURATION ENABLED) */}
+      <div className="dashboard-grid">
         
         {/* LEFT COLUMN: STAFF CONTROL CENTER */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
