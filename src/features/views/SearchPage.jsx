@@ -601,8 +601,12 @@ export default function SearchPage() {
         </div>
       )}
 
-      {/* 🌟 VIEWPORT FRAMEWORK LAYER (RESPONSIVE GRID CLASS LINKED) */}
-      <div className="no-print search-matrix-grid" style={{ gridTemplateColumns: selectedPatient ? '1fr 1fr' : '1fr' }}>
+      {/* 🌟 FIND THIS VIEWPORT LAYER DIV IN SEARCHPAGE.JSX AND UPDATE IT */}
+<div className="no-print search-matrix-grid" style={{ 
+  display: 'grid',
+  gridTemplateColumns: window.innerWidth <= 1024 ? '1fr' : (selectedPatient ? '1fr 1fr' : '1fr'), 
+  gap: '24px' 
+}}>
         
         {/* LEFT HUB RETRIEVAL PANEL */}
         <div style={{ background: '#ffffff', padding: '28px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)', height: 'fit-content' }}>

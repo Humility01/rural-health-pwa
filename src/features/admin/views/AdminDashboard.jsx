@@ -630,8 +630,12 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* 🌟 TWO COLUMN CONTENT INTERACTION MATRIX (RESPONSIVE CONFIGURATION ENABLED) */}
-      <div className="dashboard-grid">
+{/* 🌟 INTERACTION MATRIX DIV IN ADMINDASHBOARD.JSX AND UPDATE IT */}
+<div className="dashboard-grid" style={{
+  display: 'grid',
+  gridTemplateColumns: window.innerWidth <= 1024 ? '1fr' : '1.1fr 1.4fr',
+  gap: '24px'
+}}>
         
         {/* LEFT COLUMN: STAFF CONTROL CENTER */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
