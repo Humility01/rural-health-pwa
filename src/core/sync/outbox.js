@@ -1,24 +1,23 @@
-import { localDb } from '../db/localDb';
+import Dexie from 'dexie';
 
-/**
- * Adds a new transactional change to the offline synchronization outbox.
- * @param {string} tableName - The target table name in Supabase (e.g., 'patients')
- * @param {string} action - The database action ('CREATE' or 'UPDATE')
- * @param {string} recordId - The unique UUID of the patient or visit record
- * @param {Object} payload - The actual data content to be sent to the cloud
- */
-export async function addToOutbox(tableName, action, recordId, payload) {
-  const outboxEntry = {
-    outbox_id: crypto.randomUUID(), // Generates a unique ID for this outbox ticket
-    device_id: navigator.userAgent, // Tracks which browser/device made the entry
-    action: action,                 // 'CREATE' or 'UPDATE'
-    table_name: tableName,          // Which table this data belongs to
-    record_id: recordId,            // The specific data row ID
-    payload: payload,               // The actual health data package
-    created_at: new Date().toISOString(),
-    synced: 0                       // 0 means 'Pending Sync', 1 means 'Done'
-  };
+export const localDb = new Dexie('RuralHealthSyncCoreDB');
 
-  // Write this transaction directly into our local Dexie IndexedDB outbox drawer
-  await localDb.sync_outbox.add(outboxEntry);
-}
+// Safe, compatible schema definition
+localDb.version(4).stores({
+  patients: 'patient_id, first_name, last_name, barcode_id',
+  facilities: 'facility_id, facility_name, location',
+  visit: 'visit_id, patient_id, user_id, visit_date',
+  complaint: 'complaint_id, visit_id',
+  vitals: 'vitals_id, visit_id',
+  examination: 'examination_id, visit_id',
+  medication_dispensed: 'med_dispensed_id, visit_id',
+  past_medical_history: 'history_id, patient_id',
+  allergy: 'allergy_id, patient_id',
+  users: 'user_id, email, role',
+  sync_outbox: 'outbox_id, device_id, action, table_name, record_id, synced, created_at'
+});
+
+// Handle upgrade errors gracefully without crashing the application
+localDb.on('versionchange', () => {
+  localDb.close();
+});

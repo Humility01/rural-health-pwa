@@ -7,8 +7,9 @@ const getSupabaseTableName = (localName) => {
     case 'visit': return 'clinical_visits';
     case 'complaint': return 'complaints';
     case 'medication_dispensed': return 'medications_dispensed';
-    case 'past_medical_history': return 'past_medical_history'; // ✅ Enabled native routing keys
-    case 'allergy': return 'allergy';                           // ✅ Enabled native routing keys
+    case 'past_medical_history': return 'past_medical_history';
+    case 'allergy': return 'allergy';
+    case 'examination': return 'examination'; // ✅ Explicit examination table mapping
     default: return localName; 
   }
 };
@@ -21,7 +22,8 @@ const getPrimaryKeyColumn = (supabaseName) => {
     case 'clinical_visits': return 'visit_id';
     case 'vitals': return 'vitals_id';
     case 'complaints': return 'complaint_id';
-    case 'medications_dispensed': return 'medication_id';
+    case 'examination': return 'examination_id'; // ✅ Explicit primary key mapping
+    case 'medications_dispensed': return 'med_dispensed_id';
     case 'past_medical_history': return 'history_id';
     case 'allergy': return 'allergy_id';
     default: return 'id';
@@ -41,16 +43,16 @@ export async function processSyncOutbox() {
     const tablePriority = {
       'users': 1,
       'patients': 2,
-      'past_medical_history': 3,   // Demographic child tracks
-      'allergy': 3,                // Demographic child tracks
-      'clinical_visits': 4,        // Clinical parent encounter
+      'past_medical_history': 3,
+      'allergy': 3,
+      'clinical_visits': 4,
       'visit': 4,
       'vitals': 5,
       'complaints': 5,
       'complaint': 5,
+      'examination': 5, // 👈 Relational priority level for examination records
       'medications_dispensed': 5,
-      'medication_dispensed': 5,
-      'examination': 5
+      'medication_dispensed': 5
     };
    
     pendingItems.sort((a, b) => (tablePriority[a.table_name] || 99) - (tablePriority[b.table_name] || 99));
@@ -80,28 +82,23 @@ export async function processSyncOutbox() {
       if (item.action === 'CREATE') {
         const cleanPayload = { ...item.payload };
 
-        // Handle offline-first structural safety checks natively
-        if (cloudTableName === 'examination') {
-          console.warn(`⚠️ Skipping Cloud Sync for local examination logs backup.`);
+        // 🌟 Perform real Supabase upsert/insert for all tables including 'examination'
+        const { error } = await supabase
+          .from(cloudTableName)
+          .upsert([cleanPayload], { onConflict: primaryKeyField });
+
+        if (!error) {
           uploadSuccess = true;
         } else {
-          const { error } = await supabase
-            .from(cloudTableName)
-            .insert([cleanPayload]);
-
-          if (!error) {
-            uploadSuccess = true;
-          } else {
-            console.error(`❌ Supabase CREATE Rejection on table [${cloudTableName}]:`, {
-              message: error.message,
-              details: error.details,
-              hint: error.hint,
-              code: error.code
-            });
-            
-            if (error.code === 'PGRST205') {
-              uploadSuccess = true; 
-            }
+          console.error(`❌ Supabase CREATE/UPSERT Rejection on table [${cloudTableName}]:`, {
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+            code: error.code
+          });
+          
+          if (error.code === 'PGRST205' || error.code === '23505') { // Duplicate or already exists
+            uploadSuccess = true; 
           }
         }
       }
@@ -147,7 +144,7 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('online', () => {
     console.log("📡 Hardware reports Internet connection restored. Monitoring socket stability...");
     
-    // 🌟 1.5-Second Delay to bypass initial network handshake latency drop drops!
+    // 🌟 1.5-Second Delay to bypass initial network handshake latency drops!
     setTimeout(async () => {
       if (navigator.onLine) {
         console.log("🔄 Socket connection stable. Launching outbox sync...");

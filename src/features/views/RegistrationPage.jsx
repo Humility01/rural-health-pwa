@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { localDb } from '../../core/db/localDb';
 import { processSyncOutbox } from '../../core/sync/syncEngine';
 import { logSecurityEvent } from '../../core/supabase/client';
@@ -25,8 +25,40 @@ export default function RegistrationPage() {
   const [allergen, setAllergen] = useState('');
   const [reaction, setReaction] = useState('');
 
+  // --- Live Metrics States ---
+  const [registeredTodayCount, setRegisteredTodayCount] = useState(0);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+
   const [status, setStatus] = useState({ text: '', type: '' }); 
   const [submitting, setSubmitting] = useState(false);
+
+  // --- Fetch Dashboard & Intake Counters ---
+  const fetchIntakeMetrics = async () => {
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const allPatients = await localDb.patients.toArray();
+      
+      const todayPatients = allPatients.filter(p => {
+        if (!p.created_at) return false;
+        return p.created_at.startsWith(todayStr);
+      });
+      setRegisteredTodayCount(todayPatients.length);
+
+      const pendingItems = await localDb.sync_outbox
+        .where('synced')
+        .equals(0)
+        .toArray();
+      setPendingSyncCount(pendingItems.length);
+    } catch (err) {
+      console.warn("Could not load real-time registration counters:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchIntakeMetrics();
+    const interval = setInterval(fetchIntakeMetrics, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   const getStatusTheme = () => {
     switch (status.type) {
@@ -96,7 +128,6 @@ export default function RegistrationPage() {
         }
       }
 
-      // Isolate matching database row to lock down exact facility_id mapping
       let activeUserRecord = null;
       if (operatorEmail && operatorEmail !== 'Field Nurse') {
         activeUserRecord = cachedUsers.find(u => u.email.trim().toLowerCase() === operatorEmail.trim().toLowerCase());
@@ -132,7 +163,7 @@ export default function RegistrationPage() {
       phone: phone.trim() || null,
       address: address.trim() || null,
       barcode_id: generatedBarcodeId,
-      facility_id: activeFacilityId, // 🔒 FIXED: Patient row linked strictly to this context node
+      facility_id: activeFacilityId,
       created_at: timestamp,
       updated_at: timestamp
     };
@@ -180,7 +211,6 @@ export default function RegistrationPage() {
         });
       }
 
-      // Fire security vector trail straight to Supabase instance channels
       await logSecurityEvent(
         operatorId, 
         operatorEmail, 
@@ -195,6 +225,8 @@ export default function RegistrationPage() {
       setFirstName(''); setLastName(''); setDob(''); setPhone(''); setAddress(''); setGender(''); setRelationshipStatus('');
       setConditionName(''); setDiagnosedDate(''); setHistoryNotes(''); setAllergen(''); setReaction('');
       
+      await fetchIntakeMetrics();
+
       setStatus({ 
         text: `🎉 Registration Success! Profile and relational traits updated. Barcode: ${generatedBarcodeId}`, 
         type: 'SUCCESS' 
@@ -247,6 +279,89 @@ export default function RegistrationPage() {
           background: #cbd5e1; cursor: not-allowed;
         }
       `}</style>
+
+      {/* 📊 STATS COUNTER CARDS INTEGRATION (IMAGE 2 DESIGN PATTERN) */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '28px' }}>
+        
+        {/* Card 1: Registered Today */}
+        <div style={{
+          background: '#ffffff',
+          border: '1px solid #e2e8f0',
+          borderRadius: '16px',
+          padding: '20px 24px',
+          boxShadow: '0 2px 4px rgba(0, 0, 0, 0.02)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          minHeight: '130px'
+        }}>
+          {/* Top-left icon badge */}
+          <div style={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '10px',
+            background: '#eff6ff',
+            color: '#004bf6',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '18px',
+            marginBottom: '16px'
+          }}>
+            👥
+          </div>
+
+          {/* Metric Number & Label */}
+          <div>
+            <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: '0 0 6px 0', lineHeight: '1' }}>
+              {registeredTodayCount}
+            </h2>
+            <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              REGISTERED TODAY
+            </span>
+          </div>
+        </div>
+
+        {/* Card 2: Pending Sync Queue */}
+        <div style={{
+          background: '#ffffff',
+          border: '1px solid #e2e8f0',
+          borderRadius: '16px',
+          padding: '20px 24px',
+          boxShadow: '0 2px 4px rgba(0, 0, 0, 0.02)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          minHeight: '130px'
+        }}>
+          {/* Top-left icon badge */}
+          <div style={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '10px',
+            background: pendingSyncCount > 0 ? '#fffbeb' : '#e6f4ea',
+            color: pendingSyncCount > 0 ? '#d97706' : '#10b981',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '18px',
+            marginBottom: '16px'
+          }}>
+            {pendingSyncCount > 0 ? '⚡' : '📋'}
+          </div>
+
+          {/* Metric Number & Label */}
+          <div>
+            <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: '0 0 6px 0', lineHeight: '1' }}>
+              {pendingSyncCount}
+            </h2>
+            <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              PENDING SYNC QUEUE
+            </span>
+          </div>
+        </div>
+
+      </div>
 
       <h2 style={{ color: '#004bf6', marginBottom: '24px', fontSize: '22px', fontWeight: '800', letterSpacing: '-0.75px' }}>
         New Patient Registration & 3NF Clinical Records Entry

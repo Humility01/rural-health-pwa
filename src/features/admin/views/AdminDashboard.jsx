@@ -5,23 +5,52 @@ import { localDb } from '../../../core/db/localDb';
 import { supabase } from '../../../core/supabase/client';
 const supabaseLive = supabase;
 
+// 🌟 CLEAN CARD BADGE COMPONENT (NO DOTS)
+const CardBadge = ({ children, bg }) => (
+  <div style={{
+    width: '40px',
+    height: '40px',
+    borderRadius: '10px',
+    background: bg,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '18px',
+    marginBottom: '14px'
+  }}>
+    {children}
+  </div>
+);
+
+// 👤 EXACT PATIENT USER OUTLINE ICON
+const PatientUserIcon = ({ color = "#004bf6" }) => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </svg>
+);
+
 export default function AdminDashboard() {
-  // ---  User Management State ---
+  // --- User Management State ---
   const [systemUsers, setSystemUsers] = useState([]);
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState('NURSE');
   const [processing, setProcessing] = useState(false);
   
-  // ---  Diagnostics & Storage State ---
+  // --- Diagnostics & Storage State ---
   const [cachedProfilesCount, setCachedProfilesCount] = useState(0);
   const [encounterLogsCount, setEncounterLogsCount] = useState(0);
   const [outboxCount, setOutboxCount] = useState(0);
-  const [activeTab, setActiveTab] = useState('patients'); // 'patients', 'encounters', 'audit-logs', or 'sync-outbox'
+  const [activeTab, setActiveTab] = useState('patients');
   const [localPatients, setLocalPatients] = useState([]);
   const [localEncounters, setLocalEncounters] = useState([]);
   const [localOutboxRows, setLocalOutboxRows] = useState([]); 
+
+  // --- 🌟 Periodic Analytical Breakdown States (Includes Year Metric) ---
+  const [patientStats, setPatientStats] = useState({ today: 0, week: 0, month: 0, year: 0, total: 0, updated: 0 });
+  const [visitStats, setVisitStats] = useState({ today: 0, week: 0, month: 0, total: 0 });
   
-  // --- 🌟 Facility Dynamic Tenant State (Table 3.10 Compliance) ---
+  // --- Facility Dynamic Tenant State ---
   const [facilityName, setFacilityName] = useState('Loading Clinic...');
   const [facilityLocation, setFacilityLocation] = useState('Syncing Node Address...');
 
@@ -33,15 +62,12 @@ export default function AdminDashboard() {
 
   const [adminStatus, setAdminStatus] = useState({ text: '', type: '' });
 
-  // Fallback 3NF structural layout placeholder link
   const currentFacilityId = '00000000-0000-0000-0000-000000000000';
 
-  // Load everything on system mount
   useEffect(() => {
     refreshAdminDashboardCore();
   }, []);
 
-  // Fetch real-time security audit trails whenever activeTab switches or criteria changes
   useEffect(() => {
     if (activeTab === 'audit-logs') {
       fetchLiveAuditLogs();
@@ -50,23 +76,18 @@ export default function AdminDashboard() {
 
   const refreshAdminDashboardCore = async () => {
     try {
-      // 1. Fetch Diagnostics Counts from updated ERD-compliant tables
-      const encounterCount = await localDb.visit.count(); // Switched to singular 'visit' table
+      const encounterCount = await localDb.visit.count();
       const pendingSyncCount = await localDb.sync_outbox.where('synced').equals(0).count();
 
       setEncounterLogsCount(encounterCount);
       setOutboxCount(pendingSyncCount);
 
-      // 🌟 2. Fetch Facility Information Dynamically from active LocalDB/Cloud context
       let resolvedName = "Futminna Healthcare";
       let resolvedLocation = "Minna, Niger State, Nigeria";
-      let resolvedId = currentFacilityId; // Default fallback ID
+      let resolvedId = currentFacilityId;
 
       try {
-        // 🔄 FETCH: Fetch all cached users locally stored on this testing browser
         const cachedUsers = await localDb.users.toArray();
-        
-        // Try parsing every possible session state token storage wrap used by your Auth provider
         let activeEmail = "";
         const storageKeys = ['user', 'session', 'active_user', 'supabase.auth.token'];
         
@@ -75,7 +96,6 @@ export default function AdminDashboard() {
           if (rawItem) {
             try {
               const parsed = JSON.parse(rawItem);
-              // Handle nested user objects from Supabase token storage structures
               const emailCandidate = parsed.currentSession?.user?.email || parsed.user?.email || parsed.email;
               if (emailCandidate) {
                 activeEmail = emailCandidate;
@@ -90,20 +110,17 @@ export default function AdminDashboard() {
           }
         }
 
-        // Find the exact row matching the current signed-in email
         let activeUserRecord = null;
         if (activeEmail) {
           activeUserRecord = cachedUsers.find(u => u.email.trim().toLowerCase() === activeEmail.trim().toLowerCase());
         }
 
-        // Forceful Fallback: If no exact email match is isolated, match by looking at who was added LAST
         if (!activeUserRecord && cachedUsers.length > 0) {
           activeUserRecord = cachedUsers[cachedUsers.length - 1];
         }
 
         if (activeUserRecord && activeUserRecord.facility_id) {
           resolvedId = activeUserRecord.facility_id;
-          // Look up matching details from local facilities store
           const matchedFacility = await localDb.facilities.get(activeUserRecord.facility_id);
           if (matchedFacility) {
             resolvedName = matchedFacility.facility_name || resolvedName;
@@ -114,7 +131,6 @@ export default function AdminDashboard() {
         console.warn("Could not query local IndexedDB facilities profile:", localDbErr);
       }
 
-      // 🔄 Query the exact facility_id instead of bypassing the filter checks
       if (supabaseLive && resolvedId) {
         try {
           const { data: facilitiesList, error: facError } = await supabaseLive
@@ -127,7 +143,6 @@ export default function AdminDashboard() {
             resolvedName = facilitiesList.facility_name || resolvedName;
             resolvedLocation = facilitiesList.location || resolvedLocation;
 
-            // Seed local database cache so offline works perfectly on the next hot reload
             await localDb.facilities.put({
               facility_id: resolvedId,
               facility_name: resolvedName,
@@ -142,21 +157,66 @@ export default function AdminDashboard() {
       setFacilityName(resolvedName);
       setFacilityLocation(resolvedLocation);
 
-      // 🌟 3. Fetch Raw Table Arrays for the Registry Viewers (Tenant-Isolated)
       const allPatientsArray = await localDb.patients.toArray();
-      // Filter out only the profiles belonging to this active facility context
       const patientsArray = allPatientsArray.filter(p => p.facility_id === resolvedId);
       
-      // Sync metric badge count card to show facility-isolated totals
       setCachedProfilesCount(patientsArray.length);
 
-      const rawVisitsArray = await localDb.visit.toArray(); // Switched to singular 'visit' table
-      
-      // Fetch unsynced local outbox rows for our structural queue viewer
+      const rawVisitsArray = await localDb.visit.toArray();
       const outboxArray = await localDb.sync_outbox.where('synced').equals(0).toArray();
       setLocalOutboxRows(outboxArray);
 
-      // Multi-table relational map assembler to hydrate UI view rows on the dashboard layout
+      // --- DATE RANGE CALCULATIONS ---
+      const now = new Date();
+      const todayStr = now.toISOString().split('T')[0];
+      
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - now.getDay());
+      startOfWeek.setHours(0, 0, 0, 0);
+
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+      let pToday = 0, pWeek = 0, pMonth = 0, pYear = 0, pUpdated = 0;
+      patientsArray.forEach(p => {
+        const createdDate = p.created_at ? new Date(p.created_at) : null;
+        if (createdDate) {
+          if (p.created_at.startsWith(todayStr)) pToday++;
+          if (createdDate >= startOfWeek) pWeek++;
+          if (createdDate >= startOfMonth) pMonth++;
+          if (createdDate >= startOfYear) pYear++;
+        }
+        if (p.updated_at && p.created_at && p.updated_at !== p.created_at) {
+          pUpdated++;
+        }
+      });
+
+      setPatientStats({
+        today: pToday,
+        week: pWeek,
+        month: pMonth,
+        year: pYear,
+        total: patientsArray.length,
+        updated: pUpdated
+      });
+
+      let vToday = 0, vWeek = 0, vMonth = 0;
+      rawVisitsArray.forEach(v => {
+        const visitDateStr = v.visit_date || v.created_at;
+        const vDate = visitDateStr ? new Date(visitDateStr) : null;
+
+        if (visitDateStr && visitDateStr.startsWith(todayStr)) vToday++;
+        if (vDate && vDate >= startOfWeek) vWeek++;
+        if (vDate && vDate >= startOfMonth) vMonth++;
+      });
+
+      setVisitStats({
+        today: vToday,
+        week: vWeek,
+        month: vMonth,
+        total: rawVisitsArray.length
+      });
+
       const compiledEncountersArray = await Promise.all(
         rawVisitsArray.map(async (v) => {
           const complaintRow = await localDb.complaint.where('visit_id').equals(v.visit_id).first();
@@ -172,12 +232,8 @@ export default function AdminDashboard() {
       setLocalPatients(patientsArray);
       setLocalEncounters(compiledEncountersArray);
 
-      // 🌟 4. Fetch Active Staff Account Registry Matrix (Filtered by Facility ID)
       const allUsers = await localDb.users.toArray();
-      
-      // Filter out only the staff members that belong to this specific logged-in facility node
       const filteredUsers = allUsers.filter(user => user.facility_id === resolvedId);
-      
       setSystemUsers(filteredUsers);
       
     } catch (err) {
@@ -185,14 +241,9 @@ export default function AdminDashboard() {
     }
   };
 
-  // =========================================================================
-  // 🛡️ --- FETCH LIVE AUDIT LOGS FROM SUPABASE (TENANT-ISOLATED) ---
-  // =========================================================================
   const fetchLiveAuditLogs = async () => {
     try {
       setLoadingAudit(true);
-      
-      // 1. Isolate the active logged-in user context to extract their facility identifier
       let resolvedId = null;
       try {
         const cachedUsers = await localDb.users.toArray();
@@ -230,24 +281,21 @@ export default function AdminDashboard() {
         console.warn("Could not isolate active facility ID for audit trail:", e);
       }
 
-      // 2. Fetch user_ids for staff members registered under this facility node
       const localStaff = await localDb.users.toArray();
       const tenantStaffIds = localStaff
         .filter(u => u.facility_id === resolvedId)
         .map(u => u.user_id);
 
-      // Early layout escape path if zero local operator entries match
       if (tenantStaffIds.length === 0) {
         setAuditLogs([]);
         setLoadingAudit(false);
         return;
       }
 
-      // 3. Assemble filtered cloud database fetch payload queries
       let query = supabaseLive
         .from('audit_log')
         .select('*')
-        .in('user_id', tenantStaffIds) // 🔒 Security Gate: Confines lookups strictly to tenant operators
+        .in('user_id', tenantStaffIds)
         .order('timestamp', { ascending: false });
 
       if (filterAction) {
@@ -257,7 +305,6 @@ export default function AdminDashboard() {
       const { data, error } = await query;
       if (error) throw error;
 
-      // Local fuzzy filter for username matching to handle relational string evaluation neatly
       if (filterUser) {
         const cleanFilter = filterUser.toLowerCase();
         const filtered = (data || []).filter(log => 
@@ -342,8 +389,8 @@ export default function AdminDashboard() {
 
       setAdminStatus({ 
         text: cloudSyncedSuccessfully 
-          ? `🎉 Pre-Authorization Node Deployed! ${cleanEmail} is now authorized to register. Inform the staff member to complete registration using this exact email.`
-          : `⚠️ Node Provisioned Locally (Cloud Offline/Rate Limited)! ${cleanEmail} added to local cache registry. Staff member can claim account immediately.`,
+          ? `🎉 Pre-Authorization Node Deployed! ${cleanEmail} is now authorized to register.`
+          : `⚠️ Node Provisioned Locally! ${cleanEmail} added to local cache registry.`,
         type: 'SUCCESS' 
       });
       
@@ -359,11 +406,11 @@ export default function AdminDashboard() {
 
   const handleDeleteUser = async (userId, userEmail, userRole) => {
     if (userRole === 'SUPER_ADMIN') {
-      setAdminStatus({ text: '❌ Security Lockout: Root institutional SuperAdmin identities are completely immutable and cannot be deleted.', type: 'ERROR' });
+      setAdminStatus({ text: '❌ Security Lockout: Root institutional SuperAdmin identities are completely immutable.', type: 'ERROR' });
       return;
     }
 
-    if (!window.confirm(`⚠️ CRITICAL DELETION NOTICE: Are you absolutely sure you want to permanently DELETE the system credentials for: ${userEmail} from both local storage and the cloud server?`)) {
+    if (!window.confirm(`⚠️ CRITICAL DELETION NOTICE: Are you sure you want to delete ${userEmail}?`)) {
       return;
     }
 
@@ -376,16 +423,16 @@ export default function AdminDashboard() {
       if (cloudError) throw cloudError;
 
       await localDb.users.delete(userId);
-      setAdminStatus({ text: '🎉 Staff account wiped cleanly from local cache and Supabase cloud infrastructure channels.', type: 'SUCCESS' });
+      setAdminStatus({ text: '🎉 Staff account wiped cleanly.', type: 'SUCCESS' });
       refreshAdminDashboardCore();
     } catch (err) {
       console.error("Boundary Deletion Error:", err);
-      setAdminStatus({ text: `❌ Error executing database table deletion loop: ${err.message}`, type: 'ERROR' });
+      setAdminStatus({ text: `❌ Error executing deletion loop: ${err.message}`, type: 'ERROR' });
     }
   };
 
   const handleRequestFacilityDeletion = async () => {
-    if (!window.confirm("🚨 Are you absolutely certain you want to schedule this complete healthcare facility for deletion? This will instantly wipe all patient files from this machine and trigger a 21-day destruction countdown in the cloud database layers.")) {
+    if (!window.confirm("🚨 Are you absolutely certain you want to schedule this complete facility for deletion?")) {
       return;
     }
 
@@ -393,7 +440,6 @@ export default function AdminDashboard() {
       const destructionDate = new Date();
       destructionDate.setDate(destructionDate.getDate() + 21);
       
-      //  FIXED: Retrieve the active logged-in email directly from localStorage session parsing
       let activeSessionEmail = "";
       let resolvedId = null;
       
@@ -425,24 +471,22 @@ export default function AdminDashboard() {
           resolvedId = activeUserRecord?.facility_id;
         }
       } catch (e) {
-        console.warn("Could not isolate active facility ID or active email for targeted deletion:", e);
+        console.warn("Could not isolate active facility ID or email:", e);
       }
 
-      // Fallback in case local session parsing failed to find the active user
       if (!activeSessionEmail) {
         const fallbackUser = await localDb.users.where('role').equals('SUPER_ADMIN').first();
         activeSessionEmail = fallbackUser?.email || "unknown_admin@gmail.com";
         resolvedId = resolvedId || fallbackUser?.facility_id;
       }
 
-      // 🔒 Strict safety gate: enforce the matching facility constraint check and stamp the active email
       if (supabaseLive && resolvedId) {
         const { error } = await supabaseLive
           .from('facilities')
           .update({
             status: 'PENDING_PURGE',
             purge_target_at: destructionDate.toISOString(),
-            requested_by: activeSessionEmail // 🌟 FIXED: Writes the exact session email instead of Dexie's first match
+            requested_by: activeSessionEmail
           })
           .eq('facility_id', resolvedId); 
 
@@ -457,7 +501,7 @@ export default function AdminDashboard() {
       await localDb.patients.clear();
       await localDb.sync_outbox.clear();
 
-      alert(" Facility Destruction Initialized Successfully!\nLocal client caches cleared. The cloud server will fully purge all backup metrics in 21 days unless manually aborted by a SuperAdmin.");
+      alert("Facility Destruction Initialized Successfully!");
       localStorage.clear();
       window.location.reload();
     } catch (err) {
@@ -466,7 +510,7 @@ export default function AdminDashboard() {
   };
 
   const handleWipeDatabaseCache = async () => {
-    if (!window.confirm(" WARNING: You are initializing a destructive local storage database wipe. Proceed?")) return;
+    if (!window.confirm("WARNING: You are initializing a destructive local storage database wipe. Proceed?")) return;
     try {
       await localDb.visit.clear();
       await localDb.complaint.clear();
@@ -479,7 +523,7 @@ export default function AdminDashboard() {
       setAdminStatus({ text: 'Cache Cleared! Local client 3NF tables completely flushed.', type: 'SUCCESS' });
       refreshAdminDashboardCore();
     } catch (err) { 
-      setAdminStatus({ text: ' Failure dropping database blocks.', type: 'ERROR' }); 
+      setAdminStatus({ text: 'Failure dropping database blocks.', type: 'ERROR' }); 
     }
   };
 
@@ -501,7 +545,7 @@ export default function AdminDashboard() {
           background: #ffffff;
           border-radius: 16px;
           border: 1px solid #e2e8f0;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.02);
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
           padding: 24px;
         }
         .form-input {
@@ -522,13 +566,17 @@ export default function AdminDashboard() {
           padding: 10px 16px; border-radius: 10px; border: none; font-weight: 700; font-size: 13px;
           font-family: "Montserrat", sans-serif; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s ease;
         }
-        .badge-container { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+        .section-title { font-size: 13px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; margin: 8px 0 16px 0; display: flex; alignItems: center; gap: 8px; }
         
-        /* 📱 RESPONSIVE LAYOUT MATRIX */
         .metrics-grid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
-          gap: 20px;
+          gap: 16px;
+        }
+        .metrics-grid-5 {
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 16px;
         }
         .dashboard-grid {
           display: grid;
@@ -536,25 +584,22 @@ export default function AdminDashboard() {
           gap: 24px;
         }
 
-        /* 📟 Screen sizes smaller than 1024px (Tablets & Landscape Mobile) */
-        @media (max-width: 1024px) {
-          .metrics-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-          .dashboard-grid {
-            grid-template-columns: 1fr;
-          }
+        @media (max-width: 1280px) {
+          .metrics-grid-5 { grid-template-columns: repeat(3, 1fr); }
         }
 
-        /* 📱 Screen sizes smaller than 640px (Portrait Mobile Devices) */
+        @media (max-width: 1024px) {
+          .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+          .metrics-grid-5 { grid-template-columns: repeat(2, 1fr); }
+          .dashboard-grid { grid-template-columns: 1fr; }
+        }
+
         @media (max-width: 640px) {
-          .metrics-grid {
-            grid-template-columns: 1fr;
-          }
+          .metrics-grid, .metrics-grid-5 { grid-template-columns: 1fr; }
         }
       `}</style>
       
-      {/* 🌟 DYNAMIC HEADER BLOCK INTEGRATION (Table 3.10 Layout Mapping) */}
+      {/* 🌟 DYNAMIC HEADER BLOCK */}
       <div>
         <h2 style={{ color: '#0f172a', margin: '0 0 4px 0', fontSize: '26px', fontWeight: '800', letterSpacing: '-0.75px' }}>
           {facilityName} Management Panel
@@ -564,63 +609,160 @@ export default function AdminDashboard() {
         </p>
       </div>
 
-      {/* 🌟 METRIC MATRIX ROW (RESPONSIVE CONFIGURATION ENABLED) */}
+      {/* --- SECTION 1: SYSTEM OVERVIEW ROW --- */}
       <div className="metrics-grid">
         
-        {/* TOTAL PATIENTS METRIC CARD */}
-        <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div className="badge-container" style={{ background: 'rgba(0, 75, 246, 0.06)', color: '#004bf6' }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-            </svg>
-          </div>
+        {/* Card 1: Total Patients */}
+        <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
+          <CardBadge bg="#eff6ff">
+            <PatientUserIcon color="#004bf6" />
+          </CardBadge>
           <div>
-            <strong style={{ fontSize: '32px', color: '#0f172a', fontWeight: '800', display: 'block', lineHeight: '1' }}>{cachedProfilesCount}</strong>
-            <span style={{ fontSize: '11px', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginTop: '6px' }}>Total Patients</span>
+            <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0', lineHeight: '1' }}>{cachedProfilesCount}</h2>
+            <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>TOTAL PATIENTS</span>
           </div>
         </div>
 
-        {/* TOTAL RECORDS METRIC CARD */}
-        <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div className="badge-container" style={{ background: '#e6f4ea', color: '#137333' }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        {/* Card 2: Total Records */}
+        <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
+          <CardBadge bg="#e6f4ea">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
               <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
             </svg>
-          </div>
+          </CardBadge>
           <div>
-            <strong style={{ fontSize: '32px', color: '#0f172a', fontWeight: '800', display: 'block', lineHeight: '1' }}>{encounterLogsCount}</strong>
-            <span style={{ fontSize: '11px', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginTop: '6px' }}>Total Records</span>
+            <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0', lineHeight: '1' }}>{encounterLogsCount}</h2>
+            <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>TOTAL RECORDS</span>
           </div>
         </div>
 
-        {/* PENDING SYNC METRIC CARD */}
-        <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div className="badge-container" style={{ background: '#fdf2e9', color: '#b06000' }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+        {/* Card 3: Pending Sync */}
+        <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
+          <CardBadge bg={outboxCount > 0 ? '#fffbeb' : '#e6f4ea'}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={outboxCount > 0 ? '#d97706' : '#10b981'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
             </svg>
-          </div>
+          </CardBadge>
           <div>
-            <strong style={{ fontSize: '32px', color: outboxCount > 0 ? '#dc2626' : '#0f172a', fontWeight: '800', display: 'block', lineHeight: '1' }}>{outboxCount}</strong>
-            <span style={{ fontSize: '11px', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginTop: '6px' }}>Pending Sync</span>
+            <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0', lineHeight: '1' }}>{outboxCount}</h2>
+            <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>PENDING SYNC</span>
           </div>
         </div>
 
-        {/* HEALTH ARCHITECTURE ENGINE STATUS CARD */}
-        <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div className="badge-container" style={{ background: '#e6f4ea', color: '#137333' }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
+        {/* Card 4: System Engine */}
+        <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
+          <CardBadge bg="#e6f4ea">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="9" />
             </svg>
-          </div>
+          </CardBadge>
           <div>
-            <strong style={{ fontSize: '16px', color: '#137333', fontWeight: '800', display: 'block', marginTop: '4px' }}>Online Provider</strong>
-            <span style={{ fontSize: '11px', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginTop: '6px' }}>System Engine</span>
+            <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#10b981', margin: '0 0 4px 0', lineHeight: '1' }}>Online Provider</h2>
+            <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>SYSTEM ENGINE</span>
           </div>
         </div>
+      </div>
 
+      {/* --- SECTION 2: PATIENT REGISTRATION BREAKDOWN (INCLUDES REGISTERED THIS YEAR) --- */}
+      <div>
+        <h3 className="section-title"><span>👥</span> PATIENT REGISTRATION BREAKDOWN</h3>
+        <div className="metrics-grid-5">
+          
+          {/* 1. Today */}
+          <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
+            <CardBadge bg="#eff6ff">
+              <PatientUserIcon color="#004bf6" />
+            </CardBadge>
+            <div>
+              <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0', lineHeight: '1' }}>{patientStats.today}</h2>
+              <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>REGISTERED TODAY</span>
+            </div>
+          </div>
+
+          {/* 2. This Week */}
+          <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
+            <CardBadge bg="#eff6ff">
+              <PatientUserIcon color="#004bf6" />
+            </CardBadge>
+            <div>
+              <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0', lineHeight: '1' }}>{patientStats.week}</h2>
+              <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>REGISTERED THIS WEEK</span>
+            </div>
+          </div>
+
+          {/* 3. This Month */}
+          <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
+            <CardBadge bg="#eff6ff">
+              <PatientUserIcon color="#004bf6" />
+            </CardBadge>
+            <div>
+              <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0', lineHeight: '1' }}>{patientStats.month}</h2>
+              <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>REGISTERED THIS MONTH</span>
+            </div>
+          </div>
+
+          {/* 4. This Year 🌟 NEW */}
+          <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
+            <CardBadge bg="#eff6ff">
+              <PatientUserIcon color="#004bf6" />
+            </CardBadge>
+            <div>
+              <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0', lineHeight: '1' }}>{patientStats.year}</h2>
+              <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>REGISTERED THIS YEAR</span>
+            </div>
+          </div>
+
+          {/* 5. Profiles Updated */}
+          <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
+            <CardBadge bg="#eff6ff">
+              <PatientUserIcon color="#004bf6" />
+            </CardBadge>
+            <div>
+              <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0', lineHeight: '1' }}>{patientStats.updated}</h2>
+              <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>PROFILES UPDATED</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* --- SECTION 3: CLINICAL ENCOUNTERS BREAKDOWN --- */}
+      <div>
+        <h3 className="section-title"><span>🩺</span> CLINICAL ENCOUNTERS BREAKDOWN</h3>
+        <div className="metrics-grid">
+          <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
+            <CardBadge bg="#f0fdf4">🩺</CardBadge>
+            <div>
+              <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0', lineHeight: '1' }}>{visitStats.today}</h2>
+              <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>VISITS TODAY</span>
+            </div>
+          </div>
+
+          <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
+            <CardBadge bg="#f0fdf4">📊</CardBadge>
+            <div>
+              <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0', lineHeight: '1' }}>{visitStats.week}</h2>
+              <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>VISITS THIS WEEK</span>
+            </div>
+          </div>
+
+          <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
+            <CardBadge bg="#f0fdf4">🗓️</CardBadge>
+            <div>
+              <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0', lineHeight: '1' }}>{visitStats.month}</h2>
+              <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>VISITS THIS MONTH</span>
+            </div>
+          </div>
+
+          <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
+            <CardBadge bg="#faf5ff">📚</CardBadge>
+            <div>
+              <h2 style={{ fontSize: '28px', fontWeight: '800', color: '#0f172a', margin: '0 0 4px 0', lineHeight: '1' }}>{visitStats.total}</h2>
+              <span style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>TOTAL ENCOUNTERS (ANNUAL)</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* DYNAMIC SYSTEM ALERT NOTIFICATIONS */}
@@ -630,12 +772,12 @@ export default function AdminDashboard() {
         </div>
       )}
 
-{/* 🌟 INTERACTION MATRIX DIV IN ADMINDASHBOARD.JSX AND UPDATE IT */}
-<div className="dashboard-grid" style={{
-  display: 'grid',
-  gridTemplateColumns: window.innerWidth <= 1024 ? '1fr' : '1.1fr 1.4fr',
-  gap: '24px'
-}}>
+      {/* --- DASHBOARD SPLIT WORKSPACE GRID --- */}
+      <div className="dashboard-grid" style={{
+        display: 'grid',
+        gridTemplateColumns: window.innerWidth <= 1024 ? '1fr' : '1.1fr 1.4fr',
+        gap: '24px'
+      }}>
         
         {/* LEFT COLUMN: STAFF CONTROL CENTER */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -712,7 +854,7 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* EMERGENCY CRYPTOGRAPHIC VAULT PURGE ROUTINES */}
+          {/* EMERGENCY PURGE */}
           <div className="panel-card" style={{ background: '#fff1f2', border: '1px solid #ffe4e6', display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <h4 style={{ margin: '0', color: '#991b1b', fontSize: '13px', fontWeight: '800', letterSpacing: '0.25px' }}>⚠️ SYSTEM DESTRUCTION VAULT</h4>
             <p style={{ margin: '0', fontSize: '12px', color: '#9f1239', lineHeight: '1.5', fontWeight: '500' }}>
@@ -733,7 +875,6 @@ export default function AdminDashboard() {
         {/* RIGHT COLUMN: CORE REGISTRY DATA PANELS */}
         <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           
-          {/* TAB ROUTING AND DATA CONTROL STRIPS */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '14px', flexWrap: 'wrap', gap: '12px' }}>
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               <button 
@@ -782,7 +923,6 @@ export default function AdminDashboard() {
             </button>
           </div>
 
-          {/* DATA CONTAINER: PATIENTS MATRIX REGISTRY */}
           {activeTab === 'patients' && (
             <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px', whiteSpace: 'nowrap' }}>
@@ -812,7 +952,6 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {/* DATA CONTAINER: MEDICAL ENCOUNTERS LOGS REGISTRY */}
           {activeTab === 'encounters' && (
             <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px', whiteSpace: 'nowrap' }}>
@@ -840,7 +979,6 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {/* --- INTEGRATED PIPELINE: SECURITY AUDIT LOG VIEW PANEL --- */}
           {activeTab === 'audit-logs' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
@@ -867,7 +1005,7 @@ export default function AdminDashboard() {
               </div>
 
               {loadingAudit ? (
-                <p style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic', padding: '16px 0' }}>Querying structural secure infrastructure trail collections...</p>
+                <p style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic', padding: '16px 0' }}>Querying audit trails...</p>
               ) : (
                 <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px', whiteSpace: 'nowrap' }}>
@@ -882,7 +1020,7 @@ export default function AdminDashboard() {
                     </thead>
                     <tbody>
                       {auditLogs.length === 0 ? (
-                        <tr><td colSpan="5" style={{ padding: '32px', textAlign: 'center', color: '#94a3b8', fontStyle: 'italic', fontWeight: '500' }}>No audit trail entries matching criteria located in Supabase tables.</td></tr>
+                        <tr><td colSpan="5" style={{ padding: '32px', textAlign: 'center', color: '#94a3b8', fontStyle: 'italic', fontWeight: '500' }}>No audit trail entries matching criteria located.</td></tr>
                       ) : (
                         auditLogs.map((log) => (
                           <tr key={log.log_id || log.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
@@ -915,7 +1053,6 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {/* DATA CONTAINER: PENDING SYNC OUTBOX MATRIX QUEUE (Table 3.11 Compliance) */}
           {activeTab === 'sync-outbox' && (
             <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px', whiteSpace: 'nowrap' }}>

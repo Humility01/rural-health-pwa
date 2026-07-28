@@ -25,13 +25,16 @@ export default function SearchPage() {
   const [viewingFullRecords, setViewingFullRecords] = useState(false);
   const [patientFullHistoryList, setPatientFullHistoryList] = useState([]);
 
+  // --- 🌟 NEW: Demographic Subsystem Records States ---
+  const [patientAllergies, setPatientAllergies] = useState([]);
+  const [patientHistory, setPatientHistory] = useState([]);
+
   // --- 🌟 NEW: Facility Tenant Print State (Table 3.10 Compliance) ---
   const [printFacilityName, setPrintFacilityName] = useState('RURALHEALTH');
 
   // --- 🌟 NEW: Hook to Fetch Clinic Name for Printed Assets dynamically ---
   useEffect(() => {
     const fetchClinicNameForPrint = async () => {
-      // Isolate current user context to query the explicit matching clinic name row
       let resolvedId = null;
       try {
         const cachedUsers = await localDb.users.toArray();
@@ -103,7 +106,7 @@ export default function SearchPage() {
       blood_pressure: vitalsData?.blood_pressure || 'N/A', 
       weight_kg: vitalsData?.weight || 'N/A',
       heart_rate: vitalsData?.heart_rate || 'N/A',
-      respiratory_rate: 'N/A', 
+      respiratory_rate: vitalsData?.respiratory_rate || 'N/A', 
       presenting_complaint: complaintData?.symptom || 'General Consultation',
       duration_days: complaintData?.duration || 'N/A',
       diagnosis_notes: complaintData?.diagnosis_notes || 'Review',
@@ -124,6 +127,8 @@ export default function SearchPage() {
     setLastMonthCache([]);
     setGlobalHistory([]);
     setViewingFullRecords(false);
+    setPatientAllergies([]);
+    setPatientHistory([]);
     
     const cleanQuery = searchQuery.trim();
     if (!cleanQuery) {
@@ -134,7 +139,6 @@ export default function SearchPage() {
 
     setSearching(true);
     try {
-      // 🌟 Isolate the current user session context to locate the active facility_id
       let activeFacilityId = null;
       try {
         const cachedUsers = await localDb.users.toArray();
@@ -168,10 +172,9 @@ export default function SearchPage() {
           .first();
           
         if (match) {
-          // 🔒 SECURITY GATE check: Intercept cross-clinic database views instantly
           if (match.facility_id && match.facility_id !== activeFacilityId) {
             setStatus({ text: '❌ Security Access Denied: This patient profile belongs to a separate healthcare node.', type: 'ERROR' });
-            boxSearchResults([]);
+            setSearchResults([]);
             setSearching(false);
             return;
           }
@@ -181,7 +184,6 @@ export default function SearchPage() {
         const queryLower = cleanQuery.toLowerCase();
         const allPatients = await localDb.patients.toArray();
         
-        // 🔒 SECURITY FILTER: Restrict text searches solely to current logged-in station data boundaries
         records = allPatients.filter(patient => 
           patient.facility_id === activeFacilityId && (
             patient.first_name.toLowerCase().includes(queryLower) ||
@@ -202,7 +204,6 @@ export default function SearchPage() {
           .maybeSingle();
 
         if (cloudPatient) {
-          // 🔒 CLOUD PRIVACY CHECK: Verify retrieved data points don't point to external system indices
           if (cloudPatient.facility_id && cloudPatient.facility_id !== activeFacilityId) {
             setStatus({ text: '❌ Security Access Denied: This patient profile belongs to a separate healthcare node.', type: 'ERROR' });
             setSearchResults([]);
@@ -280,6 +281,7 @@ export default function SearchPage() {
     setStatus({ text: `📌 Active working context bound to: ${patient.first_name} ${patient.last_name}`, type: 'SUCCESS' });
 
     try {
+      // 1. Fetch Clinical Visits
       const rawVisits = await localDb.visit
         .where('patient_id')
         .equals(patient.patient_id)
@@ -303,6 +305,21 @@ export default function SearchPage() {
       } else {
         setPatientFullHistoryList([]);
       }
+
+      // 2. Fetch Allergies Subsystem Records
+      const rawAllergies = await localDb.allergy
+        .where('patient_id')
+        .equals(patient.patient_id)
+        .toArray();
+      setPatientAllergies(rawAllergies || []);
+
+      // 3. Fetch Past Medical History Subsystem Records
+      const rawHistory = await localDb.past_medical_history
+        .where('patient_id')
+        .equals(patient.patient_id)
+        .toArray();
+      setPatientHistory(rawHistory || []);
+
     } catch (err) {
       console.error("Offline summary fetch error:", err);
     }
@@ -343,7 +360,6 @@ export default function SearchPage() {
         synced: 0
       });
 
-      // 🛡️ TRIGGER SECURITY AUDIT AUTOMATIC SESSION INTERCEPT ENGINE (FOR UPDATES)
       let operatorEmail = 'Field Nurse';
       let operatorId = null;
 
@@ -474,7 +490,6 @@ export default function SearchPage() {
         }
         .vault-button:hover { background: #003cd1; }
         
-        /* 📱 RESPONSIVE INTERACTION VIEWPORT STYLES */
         .search-matrix-grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
@@ -490,8 +505,9 @@ export default function SearchPage() {
         
         #printable-id-pass-container, #printable-history-report { display: none !important; }
 
+        /* 🖨️ STRICT PRINT CONTROL RULE: Hides Allergy & Past History from physical printouts */
         @media print {
-          header, form, button, nav, .no-print, .vault-button, .modal-overlay { display: none !important; }
+          header, form, button, nav, .no-print, .vault-button, .modal-overlay, .non-printable-trait { display: none !important; }
           body { background: white !important; padding: 0 !important; margin: 0 !important; }
           
           #printable-id-pass-container {
@@ -520,7 +536,6 @@ export default function SearchPage() {
             <span style={{ fontSize: '9px', fontWeight: '900', color: '#004bf6', textTransform: 'uppercase' }}>
               NIGERIA {printFacilityName} SECURITY PASS
             </span>
-            <span style={{ fontSize: '12px' }}></span>
           </div>
           <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>{selectedPatient.first_name} {selectedPatient.last_name}</div>
           <div style={{ fontSize: '10px', color: '#475569' }}>Gender: <strong>{selectedPatient.gender}</strong> | DOB: <strong>{selectedPatient.date_of_birth}</strong></div>
@@ -539,7 +554,7 @@ export default function SearchPage() {
               </h1>
               <span style={{ fontSize: '12px', color: '#475569' }}>Official Patient Treatment Sheet Log Ledger</span>
             </div>
-            <div style={{ textHex: 'right', fontSize: '11px', color: '#64748b' }}>Date Printed: {new Date().toLocaleDateString()}</div>
+            <div style={{ textAlign: 'right', fontSize: '11px', color: '#64748b' }}>Date Printed: {new Date().toLocaleDateString()}</div>
           </div>
           {globalHistory.map((visit) => (
             <div key={visit.visit_id} className="report-visit-row">
@@ -601,12 +616,12 @@ export default function SearchPage() {
         </div>
       )}
 
-      {/* 🌟 FIND THIS VIEWPORT LAYER DIV IN SEARCHPAGE.JSX AND UPDATE IT */}
-<div className="no-print search-matrix-grid" style={{ 
-  display: 'grid',
-  gridTemplateColumns: window.innerWidth <= 1024 ? '1fr' : (selectedPatient ? '1fr 1fr' : '1fr'), 
-  gap: '24px' 
-}}>
+      {/* --- MAIN SEARCH HUB VIEWPORT CONTAINER --- */}
+      <div className="no-print search-matrix-grid" style={{ 
+        display: 'grid',
+        gridTemplateColumns: window.innerWidth <= 1024 ? '1fr' : (selectedPatient ? '1fr 1fr' : '1fr'), 
+        gap: '24px' 
+      }}>
         
         {/* LEFT HUB RETRIEVAL PANEL */}
         <div style={{ background: '#ffffff', padding: '28px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)', height: 'fit-content' }}>
@@ -712,6 +727,52 @@ export default function SearchPage() {
                     Passport Card
                   </button>
                 </div>
+              </div>
+
+              {/* 🚫 ALLERGY & SENSITIVITIES REGISTRY (SCREEN ONLY) */}
+              <div className="non-printable-trait" style={{
+                background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: '12px',
+                padding: '16px', marginBottom: '16px'
+              }}>
+                <h4 style={{ color: '#be123c', margin: '0 0 8px 0', fontSize: '13px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  ⚠️ Allergy & Sensitivities Registry (Screen Only)
+                </h4>
+                {patientAllergies.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {patientAllergies.map((item) => (
+                      <div key={item.allergy_id || Math.random()} style={{ fontSize: '13px', color: '#9f1239', fontWeight: '600' }}>
+                        • <strong>{item.allergen}</strong>: {item.reaction || 'No reaction notes logged.'}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ margin: 0, fontSize: '13px', color: '#9f1239', fontStyle: 'italic' }}>
+                    No allergy sensitivities logged for this patient profile.
+                  </p>
+                )}
+              </div>
+
+              {/* 🚫 PAST MEDICAL HISTORY (SCREEN ONLY) */}
+              <div className="non-printable-trait" style={{
+                background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '12px',
+                padding: '16px', marginBottom: '16px'
+              }}>
+                <h4 style={{ color: '#0369a1', margin: '0 0 8px 0', fontSize: '13px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  📋 Past Medical History (Screen Only)
+                </h4>
+                {patientHistory.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {patientHistory.map((item) => (
+                      <div key={item.history_id || Math.random()} style={{ fontSize: '13px', color: '#0c4a6e', fontWeight: '600' }}>
+                        • <strong>{item.condition_name}</strong> {item.diagnosed_date ? `(Diagnosed: ${item.diagnosed_date})` : ''} — {item.notes || 'No historical clinical notes.'}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ margin: 0, fontSize: '13px', color: '#0c4a6e', fontStyle: 'italic' }}>
+                    No baseline medical conditions recorded.
+                  </p>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>

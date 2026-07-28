@@ -55,52 +55,56 @@ export default function NewVisitWizard({ patient, onComplete }) {
     // 🏥 RECONCILED SCHEMA OBJECT MODEL MAPPING - 100% ALIGNED WITH NEW SQL
     // =========================================================================
 
-    // 1. Visit Entity (Perfect match for your clean public.clinical_visits schema)
+    // 1. Visit Entity (Perfect match for public.clinical_visits schema)
     const visitData = {
       visit_id: newVisitId,
       patient_id: patientId,
+      user_id: validOperatorUuid,
       visit_date: visitDateString, 
       relationship_status: patient?.relationship_status || 'Single',
-      facility_id: '05953ac8-a273-4680-901a-2cc0b9dd00ae', // Your default live FUTMinna facility UUID node
-      vitals_summary: `Temp: ${temperature || 'N/A'}°C | BP: ${bpSys && bpDia ? `${bpSys}/${bpDia}` : 'N/A'}`,
-      clinical_notes: `Complaint: ${symptom.trim()}. Appearance: ${generalAppearance.trim() || 'Normal'}.`
+      facility_id: patient?.facility_id || '05953ac8-a273-4680-901a-2cc0b9dd00ae',
+      vitals_summary: `Temp: ${temperature || 'N/A'}°C | BP: ${bpSys && bpDia ? `${bpSys}/${bpDia}` : 'N/A'} | HR: ${heartRate || 'N/A'}`,
+      clinical_notes: `Complaint: ${symptom.trim()}. Appearance: ${generalAppearance.trim() || 'Normal'}. Diagnosis: ${diagnosisNotes.trim() || 'Pending'}.`
     };
 
-    // 2. Complaint Entity (Perfect match for your public.complaints schema)
+    // 2. Complaint Entity (Perfect match for public.complaints schema)
     const complaintData = {
       complaint_id: crypto.randomUUID(),
       visit_id: newVisitId,
       symptom: symptom.trim(),
-      duration: duration.trim() // Sent as raw text string matching your new TEXT schema type
+      duration: duration.trim()
     };
 
-    // 3. Vitals Entity (Perfect match for your public.vitals schema)
+    // 3. Vitals Entity (Perfect match for public.vitals schema)
     const vitalsData = {
       vitals_id: crypto.randomUUID(),
       visit_id: newVisitId,
       temperature: temperature ? parseFloat(temperature) : null,
-      blood_pressure: bpSys && bpDia ? `${bpSys}/${bpDia}` : 'N/A', // Clean single string column format "120/80"
+      blood_pressure: bpSys && bpDia ? `${bpSys}/${bpDia}` : 'N/A',
       heart_rate: heartRate ? parseInt(heartRate) : null,
+      respiratory_rate: respiratoryRate ? parseInt(respiratoryRate) : null,
       weight: weight ? parseFloat(weight) : null
     };
 
-    // 4. Examination Entity
+    // 4. Examination Entity (Perfect match for Table 3.7 / public.examination schema)
     const examinationData = {
       examination_id: crypto.randomUUID(),
       visit_id: newVisitId,
       general_appearance: generalAppearance.trim() || null,
       system_findings: systemFindings.trim() || null,
-      diagnosis_notes: diagnosisNotes.trim() || null
+      diagnosis_notes: diagnosisNotes.trim() || null,
+      created_at: timestamp,
+      updated_at: timestamp
     };
 
-    // 5. Medication Dispensed Entity (Perfect match for your public.medications_dispensed schema)
+    // 5. Medication Dispensed Entity (Perfect match for public.medications_dispensed schema)
     const medicationData = {
       med_dispensed_id: crypto.randomUUID(),
       visit_id: newVisitId,
       drug_name: drugName.trim() || 'None Prescribed',
       dosage: dosage.trim() || null,
       frequency: frequency.trim() || null,
-      duration: medDuration.trim() || null // Clean text parameter field
+      duration: medDuration.trim() || null
     };
 
     try {
@@ -108,7 +112,7 @@ export default function NewVisitWizard({ patient, onComplete }) {
       await localDb.visit.add(visitData);
       await localDb.complaint.add(complaintData);
       await localDb.vitals.add(vitalsData);
-      await localDb.examination.add(examinationData);
+      await localDb.examination.add(examinationData); // 👈 Dedicated local examination store
       await localDb.medication_dispensed.add(medicationData);
 
       // 📦 STEP B: Queue transaction payloads matching exact Supabase destination metrics
@@ -116,7 +120,7 @@ export default function NewVisitWizard({ patient, onComplete }) {
         { table: 'clinical_visits', id: newVisitId, payload: visitData },
         { table: 'complaints', id: complaintData.complaint_id, payload: complaintData },
         { table: 'vitals', id: vitalsData.vitals_id, payload: vitalsData },
-        { table: 'examination', id: examinationData.examination_id, payload: examinationData },
+        { table: 'examination', id: examinationData.examination_id, payload: examinationData }, // 👈 Explicit examination packet
         { table: 'medications_dispensed', id: medicationData.med_dispensed_id, payload: medicationData }
       ];
 
@@ -283,7 +287,7 @@ export default function NewVisitWizard({ patient, onComplete }) {
           </div>
         </div>
 
-        {/* COMPILING ACTION TRIGGER TRIGGER BUTTON */}
+        {/* COMPILING ACTION TRIGGER BUTTON */}
         <div style={{ marginTop: '8px' }}>
           <button type="submit" disabled={submitting} className="submit-btn">
              {submitting ? 'Streaming Relational 3NF Model Packets...' : 'Save Encounter Record (Offline-Safe)'}
