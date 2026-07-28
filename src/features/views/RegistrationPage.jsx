@@ -364,7 +364,7 @@ export default function RegistrationPage() {
       </div>
 
       <h2 style={{ color: '#004bf6', marginBottom: '24px', fontSize: '22px', fontWeight: '800', letterSpacing: '-0.75px' }}>
-        New Patient Registration & 3NF Clinical Records Entry
+        New Patient Registration
       </h2>
 
       {status.text && (
@@ -468,7 +468,7 @@ export default function RegistrationPage() {
             <polyline points="17 21 17 13 7 13 7 21" />
             <polyline points="7 3 7 8 15 8" />
           </svg>
-          {submitting ? 'Processing Intake...' : 'Register Patient & Stream Sync'}
+          {submitting ? 'Processing Intake...' : 'Register Patient'}
         </button>
       </form>
     </div>

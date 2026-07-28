@@ -12,27 +12,36 @@ export default function SearchPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
-  const [lastVisitCache, setLastVisitCache] = useState(null); // 🧠 Emergency Horizon 1 Anchor (Assembled 3NF Object)
-  const [lastMonthCache, setLastMonthCache] = useState([]);   // 🧠 Emergency Horizon 2 Anchor (Assembled 3NF Array)
-  const [globalHistory, setGlobalHistory] = useState([]);     // ☁️ Horizon 3 Print Matrix (Assembled 3NF Array)
+  const [lastVisitCache, setLastVisitCache] = useState(null);
+  const [lastMonthCache, setLastMonthCache] = useState([]);
+  const [globalHistory, setGlobalHistory] = useState([]);
   const [status, setStatus] = useState({ text: '', type: '' });
   const [searching, setSearching] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  // --- NEW STATE FOR ADDED FEATURES ---
+  // --- Profile Edit & View States ---
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({ first_name: '', last_name: '', relationship_status: '', phone: '', address: '' });
   const [viewingFullRecords, setViewingFullRecords] = useState(false);
   const [patientFullHistoryList, setPatientFullHistoryList] = useState([]);
 
-  // --- 🌟 NEW: Demographic Subsystem Records States ---
+  // --- Demographic Subsystem Records States ---
   const [patientAllergies, setPatientAllergies] = useState([]);
   const [patientHistory, setPatientHistory] = useState([]);
 
-  // --- 🌟 NEW: Facility Tenant Print State (Table 3.10 Compliance) ---
+  // --- States for Adding Trait Records to Existing Patients ---
+  const [showAddAllergy, setShowAllergyForm] = useState(false);
+  const [newAllergen, setNewAllergen] = useState('');
+  const [newReaction, setNewReaction] = useState('');
+
+  const [showAddHistory, setShowHistoryForm] = useState(false);
+  const [newConditionName, setNewConditionName] = useState('');
+  const [newDiagnosedDate, setNewDiagnosedDate] = useState('');
+  const [newHistoryNotes, setNewHistoryNotes] = useState('');
+
+  // --- Facility Tenant Print State ---
   const [printFacilityName, setPrintFacilityName] = useState('RURALHEALTH');
 
-  // --- 🌟 NEW: Hook to Fetch Clinic Name for Printed Assets dynamically ---
   useEffect(() => {
     const fetchClinicNameForPrint = async () => {
       let resolvedId = null;
@@ -63,9 +72,7 @@ export default function SearchPage() {
       if (supabaseLive) {
         try {
           let query = supabaseLive.from('facilities').select('facility_name');
-          if (resolvedId) {
-            query = query.eq('facility_id', resolvedId);
-          }
+          if (resolvedId) query = query.eq('facility_id', resolvedId);
           const { data: facilitiesList, error: facError } = await query.limit(1);
 
           if (!facError && facilitiesList && facilitiesList.length > 0) {
@@ -74,7 +81,6 @@ export default function SearchPage() {
             setPrintFacilityName('FUTMINNA HEALTHCARE');
           }
         } catch (err) {
-          console.warn("Operating offline. Print templates using default fallback headers.", err);
           setPrintFacilityName('FUTMINNA HEALTHCARE');
         }
       }
@@ -116,9 +122,6 @@ export default function SearchPage() {
     };
   };
 
-  // =========================================================================
-  // 🔍 TENANT-ISOLATED CORE RETRIEVAL SEARCH LOOP
-  // =========================================================================
   const handleSearch = async (e) => {
     e.preventDefault();
     setStatus({ text: '', type: '' });
@@ -144,7 +147,6 @@ export default function SearchPage() {
         const cachedUsers = await localDb.users.toArray();
         const rawSession = localStorage.getItem('user') || localStorage.getItem('session') || localStorage.getItem('active_session_user') || '{}';
         let activeEmail = '';
-        
         try {
           const parsed = JSON.parse(rawSession);
           const userObj = parsed.currentSession?.user || parsed.user || parsed;
@@ -157,7 +159,6 @@ export default function SearchPage() {
         if (activeEmail) {
           activeUserRecord = cachedUsers.find(u => u.email.trim().toLowerCase() === activeEmail.trim().toLowerCase());
         }
-
         activeFacilityId = activeUserRecord?.facility_id || cachedUsers[cachedUsers.length - 1]?.facility_id;
       } catch (sessionErr) {
         console.warn("Session isolation tracking bypassed:", sessionErr);
@@ -183,7 +184,6 @@ export default function SearchPage() {
       } else {
         const queryLower = cleanQuery.toLowerCase();
         const allPatients = await localDb.patients.toArray();
-        
         records = allPatients.filter(patient => 
           patient.facility_id === activeFacilityId && (
             patient.first_name.toLowerCase().includes(queryLower) ||
@@ -192,72 +192,59 @@ export default function SearchPage() {
         );
       }
 
-      // Cloud Fallback Retrieval Gate
-      if (records.length === 0 && cleanQuery.toUpperCase().startsWith('RURAL-') && supabaseLive) {
-        setStatus({ text: '🔍 Cache Miss: Scanning permanent Supabase cloud infrastructure...', type: 'PENDING' });
-        const targetBarcode = cleanQuery.toUpperCase().trim();
-        
-        const { data: cloudPatient, error: cloudErr } = await supabaseLive
-          .from('patients')
-          .select('*')
-          .eq('barcode_id', targetBarcode)
-          .maybeSingle();
-
-        if (cloudPatient) {
-          if (cloudPatient.facility_id && cloudPatient.facility_id !== activeFacilityId) {
-            setStatus({ text: '❌ Security Access Denied: This patient profile belongs to a separate healthcare node.', type: 'ERROR' });
-            setSearchResults([]);
-            setSearching(false);
-            return;
+      // --- 🌐 CLOUD RETRIEVAL FALLBACK (If patient not in LocalDB) ---
+      if (records.length === 0 && supabaseLive) {
+        try {
+          let cloudQuery = supabaseLive.from('patients').select('*');
+          if (cleanQuery.toUpperCase().startsWith('RURAL-')) {
+            cloudQuery = cloudQuery.ilike('barcode_id', cleanQuery);
+          } else {
+            cloudQuery = cloudQuery.or(`first_name.ilike.%${cleanQuery}%,last_name.ilike.%${cleanQuery}%`);
           }
 
-          await localDb.patients.put(cloudPatient);
-          records = [cloudPatient];
+          if (activeFacilityId) {
+            cloudQuery = cloudQuery.eq('facility_id', activeFacilityId);
+          }
 
-          const [visitsRes, vitalsRes, complaintsRes, medsRes] = await Promise.all([
-            supabaseLive.from('clinical_visits').select('*').eq('patient_id', cloudPatient.patient_id),
-            supabaseLive.from('vitals').select('*'),
-            supabaseLive.from('complaints').select('*'),
-            supabaseLive.from('medications_dispensed').select('*')
-          ]);
+          const { data: cloudPatients, error: cloudErr } = await cloudQuery;
 
-          if (!visitsRes.error && visitsRes.data) {
-            for (const v of visitsRes.data) {
-              await localDb.visit.put(v);
-              if (vitalsRes.data) {
-                const matchVitals = vitalsRes.data.find(item => item.visit_id === v.visit_id);
-                if (matchVitals) await localDb.vitals.put(matchVitals);
+          if (!cloudErr && cloudPatients && cloudPatients.length > 0) {
+            for (const cp of cloudPatients) {
+              await localDb.patients.put(cp);
+              
+              // Seed allergies & history directly into LocalDB from Cloud
+              const [allergyRes, historyRes] = await Promise.all([
+                supabaseLive.from('allergy').select('*').eq('patient_id', cp.patient_id),
+                supabaseLive.from('past_medical_history').select('*').eq('patient_id', cp.patient_id)
+              ]);
+
+              if (!allergyRes.error && allergyRes.data) {
+                for (const alg of allergyRes.data) await localDb.allergy.put(alg);
               }
-              if (complaintsRes.data) {
-                const matchComplaint = complaintsRes.data.find(item => item.visit_id === v.visit_id);
-                if (matchComplaint) await localDb.complaint.put(matchComplaint);
-              }
-              if (medsRes.data) {
-                const matchMed = medsRes.data.find(item => item.visit_id === v.visit_id);
-                if (matchMed) {
-                  await localDb.medication_dispensed.put({
-                    ...matchMed,
-                    med_dispensed_id: matchMed.medication_id || matchMed.med_dispensed_id
-                  });
-                }
+
+              if (!historyRes.error && historyRes.data) {
+                for (const hst of historyRes.data) await localDb.past_medical_history.put(hst);
               }
             }
+            records = cloudPatients;
           }
+        } catch (netErr) {
+          console.warn("Cloud fallback search bypassed:", netErr);
         }
       }
 
       setSearchResults(records);
 
       if (records.length === 0) {
-        setStatus({ text: 'ℹ️ No matching patient file located within local hardware disk registry or cloud infrastructure.', type: 'EMPTY' });
+        setStatus({ text: 'ℹ️ No matching patient file located within local or cloud database.', type: 'EMPTY' });
       } else if (records.length === 1) {
         handleSelectPatient(records[0]);
       } else {
-        setStatus({ text: `🎉 Query resolved successfully. Located ${records.length} matching candidate profiles.`, type: 'SUCCESS' });
+        setStatus({ text: `🎉 Query resolved. Located ${records.length} matching candidate profiles.`, type: 'SUCCESS' });
       }
     } catch (error) {
       console.error(error);
-      setStatus({ text: '❌ Critical Error: Hardware read exception generated during dynamic array checks.', type: 'ERROR' });
+      setStatus({ text: '❌ Critical Error querying database.', type: 'ERROR' });
     } finally {
       setSearching(false);
     }
@@ -269,6 +256,8 @@ export default function SearchPage() {
     setLastMonthCache([]);
     setGlobalHistory([]);
     setViewingFullRecords(false);
+    setShowAllergyForm(false);
+    setShowHistoryForm(false);
     
     setEditForm({
       first_name: patient.first_name,
@@ -278,10 +267,8 @@ export default function SearchPage() {
       address: patient.address || ''
     });
 
-    setStatus({ text: `📌 Active working context bound to: ${patient.first_name} ${patient.last_name}`, type: 'SUCCESS' });
-
     try {
-      // 1. Fetch Clinical Visits
+      // 1. Fetch Clinical Encounters
       const rawVisits = await localDb.visit
         .where('patient_id')
         .equals(patient.patient_id)
@@ -289,13 +276,11 @@ export default function SearchPage() {
 
       if (rawVisits && rawVisits.length > 0) {
         rawVisits.sort((a, b) => new Date(b.visit_date || b.created_at) - new Date(a.visit_date || a.created_at));
-
         const assembledLatestVisit = await compile3NFVisitRecord(rawVisits[0]);
         setLastVisitCache(assembledLatestVisit);
 
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
         const recentRawVisits = rawVisits.filter(v => new Date(v.visit_date || v.created_at) >= thirtyDaysAgo);
         const assembledMonthlyList = await Promise.all(recentRawVisits.map(v => compile3NFVisitRecord(v)));
         setLastMonthCache(assembledMonthlyList);
@@ -306,22 +291,130 @@ export default function SearchPage() {
         setPatientFullHistoryList([]);
       }
 
-      // 2. Fetch Allergies Subsystem Records
-      const rawAllergies = await localDb.allergy
-        .where('patient_id')
-        .equals(patient.patient_id)
-        .toArray();
+      // 2. Fetch Allergies (Local Check + Cloud Fallback)
+      let rawAllergies = await localDb.allergy.where('patient_id').equals(patient.patient_id).toArray();
+
+      if ((!rawAllergies || rawAllergies.length === 0) && supabaseLive) {
+        try {
+          const { data: cloudAllergies, error: allergyErr } = await supabaseLive
+            .from('allergy')
+            .select('*')
+            .eq('patient_id', patient.patient_id);
+
+          if (!allergyErr && cloudAllergies && cloudAllergies.length > 0) {
+            for (const item of cloudAllergies) {
+              await localDb.allergy.put(item);
+            }
+            rawAllergies = cloudAllergies;
+          }
+        } catch (err) {
+          console.warn("Cloud allergy fetch bypassed:", err);
+        }
+      }
       setPatientAllergies(rawAllergies || []);
 
-      // 3. Fetch Past Medical History Subsystem Records
-      const rawHistory = await localDb.past_medical_history
-        .where('patient_id')
-        .equals(patient.patient_id)
-        .toArray();
+      // 3. Fetch Past Medical History (Local Check + Cloud Fallback)
+      let rawHistory = await localDb.past_medical_history.where('patient_id').equals(patient.patient_id).toArray();
+
+      if ((!rawHistory || rawHistory.length === 0) && supabaseLive) {
+        try {
+          const { data: cloudHistory, error: historyErr } = await supabaseLive
+            .from('past_medical_history')
+            .select('*')
+            .eq('patient_id', patient.patient_id);
+
+          if (!historyErr && cloudHistory && cloudHistory.length > 0) {
+            for (const item of cloudHistory) {
+              await localDb.past_medical_history.put(item);
+            }
+            rawHistory = cloudHistory;
+          }
+        } catch (err) {
+          console.warn("Cloud past history fetch bypassed:", err);
+        }
+      }
       setPatientHistory(rawHistory || []);
 
     } catch (err) {
-      console.error("Offline summary fetch error:", err);
+      console.error("Fetch error:", err);
+    }
+  };
+
+  // --- Handler to Add Allergy to an Existing Patient ---
+  const handleAddAllergy = async (e) => {
+    e.preventDefault();
+    if (!selectedPatient || !newAllergen.trim()) return;
+
+    const allergyData = {
+      allergy_id: crypto.randomUUID(),
+      patient_id: selectedPatient.patient_id,
+      allergen: newAllergen.trim(),
+      reaction: newReaction.trim() || null
+    };
+
+    try {
+      await localDb.allergy.add(allergyData);
+
+      await localDb.sync_outbox.add({
+        outbox_id: crypto.randomUUID(),
+        device_id: navigator.userAgent,
+        action: 'CREATE',
+        table_name: 'allergy',
+        record_id: allergyData.allergy_id,
+        payload: allergyData,
+        created_at: new Date().toISOString(),
+        synced: 0
+      });
+
+      setPatientAllergies(prev => [...prev, allergyData]);
+      setNewAllergen('');
+      setNewReaction('');
+      setShowAllergyForm(false);
+      setStatus({ text: '🎉 Allergy entry saved and queued for cloud sync!', type: 'SUCCESS' });
+      await processSyncOutbox();
+    } catch (err) {
+      console.error(err);
+      setStatus({ text: '❌ Failed to save allergy record.', type: 'ERROR' });
+    }
+  };
+
+  // --- Handler to Add Past Medical History to an Existing Patient ---
+  const handleAddPastHistory = async (e) => {
+    e.preventDefault();
+    if (!selectedPatient || !newConditionName.trim()) return;
+
+    const historyData = {
+      history_id: crypto.randomUUID(),
+      patient_id: selectedPatient.patient_id,
+      condition_name: newConditionName.trim(),
+      diagnosed_date: newDiagnosedDate || null,
+      notes: newHistoryNotes.trim() || null
+    };
+
+    try {
+      await localDb.past_medical_history.add(historyData);
+
+      await localDb.sync_outbox.add({
+        outbox_id: crypto.randomUUID(),
+        device_id: navigator.userAgent,
+        action: 'CREATE',
+        table_name: 'past_medical_history',
+        record_id: historyData.history_id,
+        payload: historyData,
+        created_at: new Date().toISOString(),
+        synced: 0
+      });
+
+      setPatientHistory(prev => [...prev, historyData]);
+      setNewConditionName('');
+      setNewDiagnosedDate('');
+      setNewHistoryNotes('');
+      setShowHistoryForm(false);
+      setStatus({ text: '🎉 Past Medical History record saved and queued for cloud sync!', type: 'SUCCESS' });
+      await processSyncOutbox();
+    } catch (err) {
+      console.error(err);
+      setStatus({ text: '❌ Failed to save history record.', type: 'ERROR' });
     }
   };
 
@@ -360,90 +453,27 @@ export default function SearchPage() {
         synced: 0
       });
 
-      let operatorEmail = 'Field Nurse';
-      let operatorId = null;
-
-      try {
-        const storageKeys = ['user', 'session', 'supabase.auth.token', 'active_user'];
-        let sessionData = null;
-
-        for (const key of storageKeys) {
-          const rawItem = localStorage.getItem(key);
-          if (rawItem) {
-            try {
-              const parsed = JSON.parse(rawItem);
-              const userObj = parsed.currentSession?.user || parsed.user || parsed;
-              if (userObj?.email) {
-                sessionData = userObj;
-                break;
-              }
-            } catch {
-              if (rawItem.includes('@')) operatorEmail = rawItem;
-            }
-          }
-        }
-
-        if (sessionData && sessionData.email) {
-          operatorEmail = sessionData.email;
-          operatorId = sessionData.id || sessionData.user_id || null;
-        } else {
-          const localUsers = await localDb.users.toArray();
-          const activeSessionNode = localUsers.find(u => u.is_active === 1 || u.password !== '');
-          if (activeSessionNode) {
-            operatorEmail = activeSessionNode.email;
-            operatorId = activeSessionNode.user_id;
-          } else if (localUsers.length > 0) {
-            const fallbackNode = localUsers[localUsers.length - 1];
-            operatorEmail = fallbackNode.email;
-            operatorId = fallbackNode.user_id;
-          }
-        }
-      } catch (sessionErr) {
-        console.warn("Automated audit stream extraction bypassed:", sessionErr);
-      }
-
-      if (!operatorId) {
-        try {
-          const firstValidUser = await localDb.users.toCollection().first();
-          if (firstValidUser) {
-            operatorId = firstValidUser.user_id;
-            if (operatorEmail === 'Field Nurse') operatorEmail = firstValidUser.email;
-          }
-        } catch (dbErr) { console.error(dbErr); }
-      }
-
-      await logSecurityEvent(
-        operatorId, 
-        operatorEmail, 
-        'UPDATE', 
-        'Patient',
-        selectedPatient.patient_id
-      );
-
       setSelectedPatient(updatedPatient);
       setSearchResults(prev => prev.map(p => p.patient_id === updatedPatient.patient_id ? updatedPatient : p));
       setIsEditing(false);
-      setStatus({ text: '🎉 Profile updated successfully on local node disk. Sync packet queued.', type: 'SUCCESS' });
+      setStatus({ text: '🎉 Profile updated successfully on local disk. Sync queued.', type: 'SUCCESS' });
       await processSyncOutbox();
     } catch (err) {
       console.error(err);
-      setStatus({ text: '❌ Error: Failed to commit demographic modifications to internal system storage.', type: 'ERROR' });
+      setStatus({ text: '❌ Error: Failed to commit modifications.', type: 'ERROR' });
     }
   };
 
   const handleFetchAndPrintFullHistory = async () => {
     if (!selectedPatient) return;
     setLoadingHistory(true);
-    setStatus({ text: '🔄 Compiling complete 3NF historical database ledger for printing...', type: 'PENDING' });
-
     try {
       if (patientFullHistoryList.length === 0) {
-        setStatus({ text: 'ℹ️ Printing Cancelled: Patient medical ledger chart contains zero active entry points.', type: 'INFO' });
+        setStatus({ text: 'ℹ️ Printing Cancelled: Zero active entry points.', type: 'INFO' });
         setLoadingHistory(false);
         return;
       }
       setGlobalHistory(patientFullHistoryList);
-      setStatus({ text: `🖨️ Compiled medical sheets. Opening hardware print preview...`, type: 'SUCCESS' });
       setTimeout(() => { window.print(); }, 750);
     } catch (err) {
       console.error(err);
@@ -454,7 +484,6 @@ export default function SearchPage() {
 
   const handlePrintSingleLog = (visitRecord) => {
     setGlobalHistory([visitRecord]);
-    setStatus({ text: `🖨️ Spooling tracking receipt for date: ${visitRecord.visit_date || 'Encounter'}`, type: 'SUCCESS' });
     setTimeout(() => { window.print(); }, 250);
   };
 
@@ -498,14 +527,11 @@ export default function SearchPage() {
         }
 
         @media (max-width: 1024px) {
-          .search-matrix-grid {
-            grid-template-columns: 1fr;
-          }
+          .search-matrix-grid { grid-template-columns: 1fr; }
         }
         
         #printable-id-pass-container, #printable-history-report { display: none !important; }
 
-        /* 🖨️ STRICT PRINT CONTROL RULE: Hides Allergy & Past History from physical printouts */
         @media print {
           header, form, button, nav, .no-print, .vault-button, .modal-overlay, .non-printable-trait { display: none !important; }
           body { background: white !important; padding: 0 !important; margin: 0 !important; }
@@ -559,7 +585,7 @@ export default function SearchPage() {
           {globalHistory.map((visit) => (
             <div key={visit.visit_id} className="report-visit-row">
               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '700', fontSize: '13px', marginBottom: '8px' }}>
-                <span>Encounter Record Entry Summary Sheet (3NF View)</span>
+                <span>Encounter Record Entry Summary Sheet</span>
                 <span>Date Stamped: {visit.visit_date || 'N/A'}</span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px', background: '#f8fafc', padding: '8px', border: '1px solid #e2e8f0' }}>
@@ -576,7 +602,7 @@ export default function SearchPage() {
         </div>
       )}
 
-      {/* --- EDIT PROFILE POP-UP OVERLAY LAYER --- */}
+      {/* --- EDIT PROFILE POP-UP OVERLAY --- */}
       {isEditing && (
         <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15, 23, 42, 0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px', boxSizing: 'border-box' }}>
           <div style={{ background: '#ffffff', width: '100%', maxWidth: '480px', borderRadius: '16px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', boxSizing: 'border-box' }}>
@@ -616,7 +642,7 @@ export default function SearchPage() {
         </div>
       )}
 
-      {/* --- MAIN SEARCH HUB VIEWPORT CONTAINER --- */}
+      {/* --- MAIN SEARCH HUB VIEWPORT --- */}
       <div className="no-print search-matrix-grid" style={{ 
         display: 'grid',
         gridTemplateColumns: window.innerWidth <= 1024 ? '1fr' : (selectedPatient ? '1fr 1fr' : '1fr'), 
@@ -629,7 +655,7 @@ export default function SearchPage() {
           <form onSubmit={handleSearch} style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
             <input type="text" disabled={searching} className="search-field" placeholder="Search by name or tap to scan barcode passport card..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ flex: 1 }} />
             <button type="submit" disabled={searching} className="vault-button" style={{ padding: '12px 20px', fontSize: '14px' }}>
-              {searching ? 'Syncing Storage Layers...' : 'Find Record'}
+              {searching ? 'Syncing Storage...' : 'Find Record'}
             </button>
           </form>
 
@@ -685,11 +711,11 @@ export default function SearchPage() {
           </div>
         </div>
 
-        {/* RIGHT ACTION DASHBOARD PANEL HUB */}
+        {/* RIGHT ACTION DASHBOARD PANEL */}
         {selectedPatient && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
-            {/* CORE MONITORING WORKSTATION DETAILS HUD */}
+            {/* CORE MONITORING WORKSTATION DETAILS */}
             <div style={{ background: '#ffffff', padding: '28px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)', borderTop: '5px solid #10b981' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h3 style={{ margin: 0, color: '#0f172a', fontSize: '19px', fontWeight: '800' }}>Patient Workspace Context</h3>
@@ -708,37 +734,41 @@ export default function SearchPage() {
                   <button 
                     type="button" 
                     onClick={() => setIsEditing(true)} 
-                    style={{ 
-                      flex: 1, padding: '12px', background: '#004bf6', color: 'white', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '13px', fontFamily: '"Montserrat", sans-serif', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px', transition: 'background 0.2s' 
-                    }}
+                    style={{ flex: 1, padding: '12px', background: '#004bf6', color: 'white', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '13px', fontFamily: '"Montserrat", sans-serif', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                     className="vault-button"
                   >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '5px', background: 'rgba(255,255,255,0.18)', fontSize: '11px' }}>📝</span>
-                    Edit Profile Details
+                    📝 Edit Profile Details
                   </button>
                   <button 
                     type="button" 
                     onClick={handlePrintCard} 
-                    style={{ 
-                      flex: 1, padding: '12px', background: '#ffffff', border: '1px solid #cbd5e1', color: '#334155', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '13px', fontFamily: '"Montserrat", sans-serif', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px', transition: 'all 0.2s' 
-                    }}
+                    style={{ flex: 1, padding: '12px', background: '#ffffff', border: '1px solid #cbd5e1', color: '#334155', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '13px', fontFamily: '"Montserrat", sans-serif', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                   >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '5px', background: '#f1f5f9', fontSize: '11px' }}>🖨️</span>
-                    Passport Card
+                    🖨️ Passport Card
                   </button>
                 </div>
               </div>
 
-              {/* 🚫 ALLERGY & SENSITIVITIES REGISTRY (SCREEN ONLY) */}
+              {/* ⚠️ ALLERGY & SENSITIVITIES REGISTRY (WITH QUICK-ADD FOR EXISTING PATIENTS) */}
               <div className="non-printable-trait" style={{
                 background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: '12px',
                 padding: '16px', marginBottom: '16px'
               }}>
-                <h4 style={{ color: '#be123c', margin: '0 0 8px 0', fontSize: '13px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  ⚠️ Allergy & Sensitivities Registry (Screen Only)
-                </h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <h4 style={{ color: '#be123c', margin: 0, fontSize: '13px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    ⚠️ Allergy & Sensitivities Registry
+                  </h4>
+                  <button 
+                    type="button" 
+                    onClick={() => setShowAllergyForm(!showAddAllergy)}
+                    style={{ background: '#be123c', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
+                  >
+                    {showAddAllergy ? 'Cancel' : '+ Add Allergy'}
+                  </button>
+                </div>
+
                 {patientAllergies.length > 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: showAddAllergy ? '12px' : 0 }}>
                     {patientAllergies.map((item) => (
                       <div key={item.allergy_id || Math.random()} style={{ fontSize: '13px', color: '#9f1239', fontWeight: '600' }}>
                         • <strong>{item.allergen}</strong>: {item.reaction || 'No reaction notes logged.'}
@@ -746,32 +776,65 @@ export default function SearchPage() {
                     ))}
                   </div>
                 ) : (
-                  <p style={{ margin: 0, fontSize: '13px', color: '#9f1239', fontStyle: 'italic' }}>
-                    No allergy sensitivities logged for this patient profile.
-                  </p>
+                  !showAddAllergy && (
+                    <p style={{ margin: 0, fontSize: '13px', color: '#9f1239', fontStyle: 'italic' }}>
+                      No allergy sensitivities logged for this patient profile.
+                    </p>
+                  )
+                )}
+
+                {/* Inline Quick-Add Form for Allergy */}
+                {showAddAllergy && (
+                  <form onSubmit={handleAddAllergy} style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px', background: '#ffffff', padding: '12px', borderRadius: '8px', border: '1px solid #fecdd3' }}>
+                    <input type="text" placeholder="Allergen (e.g. Penicillin)*" value={newAllergen} onChange={e => setNewAllergen(e.target.value)} required className="edit-field" style={{ padding: '8px 10px', fontSize: '12px' }} />
+                    <input type="text" placeholder="Reaction Notes (e.g. Skin Rashes)" value={newReaction} onChange={e => setNewReaction(e.target.value)} className="edit-field" style={{ padding: '8px 10px', fontSize: '12px' }} />
+                    <button type="submit" style={{ background: '#be123c', color: 'white', border: 'none', padding: '8px', borderRadius: '6px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>Save Allergy Record</button>
+                  </form>
                 )}
               </div>
 
-              {/* 🚫 PAST MEDICAL HISTORY (SCREEN ONLY) */}
+              {/* 📋 PAST MEDICAL HISTORY (WITH QUICK-ADD FOR EXISTING PATIENTS) */}
               <div className="non-printable-trait" style={{
                 background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '12px',
                 padding: '16px', marginBottom: '16px'
               }}>
-                <h4 style={{ color: '#0369a1', margin: '0 0 8px 0', fontSize: '13px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  📋 Past Medical History (Screen Only)
-                </h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <h4 style={{ color: '#0369a1', margin: 0, fontSize: '13px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    📋 Past Medical History
+                  </h4>
+                  <button 
+                    type="button" 
+                    onClick={() => setShowHistoryForm(!showAddHistory)}
+                    style={{ background: '#0369a1', color: 'white', border: 'none', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
+                  >
+                    {showAddHistory ? 'Cancel' : '+ Add History'}
+                  </button>
+                </div>
+
                 {patientHistory.length > 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: showAddHistory ? '12px' : 0 }}>
                     {patientHistory.map((item) => (
                       <div key={item.history_id || Math.random()} style={{ fontSize: '13px', color: '#0c4a6e', fontWeight: '600' }}>
-                        • <strong>{item.condition_name}</strong> {item.diagnosed_date ? `(Diagnosed: ${item.diagnosed_date})` : ''} — {item.notes || 'No historical clinical notes.'}
+                        • <strong>{item.condition_name}</strong> {item.diagnosed_date ? `(Diagnosed: ${item.diagnosed_date})` : ''} — {item.notes || 'No notes.'}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p style={{ margin: 0, fontSize: '13px', color: '#0c4a6e', fontStyle: 'italic' }}>
-                    No baseline medical conditions recorded.
-                  </p>
+                  !showAddHistory && (
+                    <p style={{ margin: 0, fontSize: '13px', color: '#0c4a6e', fontStyle: 'italic' }}>
+                      No baseline medical conditions recorded.
+                    </p>
+                  )
+                )}
+
+                {/* Inline Quick-Add Form for History */}
+                {showAddHistory && (
+                  <form onSubmit={handleAddPastHistory} style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px', background: '#ffffff', padding: '12px', borderRadius: '8px', border: '1px solid #bae6fd' }}>
+                    <input type="text" placeholder="Condition Name (e.g. Hypertension)*" value={newConditionName} onChange={e => setNewConditionName(e.target.value)} required className="edit-field" style={{ padding: '8px 10px', fontSize: '12px' }} />
+                    <input type="date" value={newDiagnosedDate} onChange={e => setNewDiagnosedDate(e.target.value)} className="edit-field" style={{ padding: '8px 10px', fontSize: '12px' }} />
+                    <input type="text" placeholder="History Clinical Notes" value={newHistoryNotes} onChange={e => setNewHistoryNotes(e.target.value)} className="edit-field" style={{ padding: '8px 10px', fontSize: '12px' }} />
+                    <button type="submit" style={{ background: '#0369a1', color: 'white', border: 'none', padding: '8px', borderRadius: '6px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' }}>Save Medical History</button>
+                  </form>
                 )}
               </div>
 
@@ -829,12 +892,12 @@ export default function SearchPage() {
                       <strong>Diagnosis Notes:</strong> <span style={{ color: '#004bf6', fontWeight: '700' }}>{lastVisitCache.diagnosis_notes}</span>
                     </div>
                   ) : (
-                    <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No baseline encounters attached to this node registry.</span>
+                    <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No baseline encounters attached.</span>
                   )}
                 </div>
               </div>
               <button type="button" onClick={handleFetchAndPrintFullHistory} disabled={loadingHistory} className="vault-button" style={{ width: '100%', padding: '14px', background: '#0f172a' }}>
-                {loadingHistory ? 'Compiling Print Spooler...' : '🖨️ Compile & Print Patient Chart History Ledger'}
+                {loadingHistory ? 'Compiling Print Spooler...' : '🖨️ Compile & Print Patient Record'}
               </button>
             </div>
 

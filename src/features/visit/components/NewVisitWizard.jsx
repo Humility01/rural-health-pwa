@@ -180,7 +180,7 @@ export default function NewVisitWizard({ patient, onComplete }) {
       `}</style>
 
       <h3 style={{ color: '#004bf6', fontSize: '18px', fontWeight: '800', margin: '0 0 4px 0', letterSpacing: '-0.5px' }}>
-        New Clinical Encounter Wizard (100% 3NF Aligned)
+        Clinical Encounter Form
       </h3>
       <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 20px 0', fontWeight: '500' }}>
         Recording observations for: <strong style={{ color: '#0f172a', fontWeight: '700' }}>{patientName}</strong>
@@ -290,7 +290,7 @@ export default function NewVisitWizard({ patient, onComplete }) {
         {/* COMPILING ACTION TRIGGER BUTTON */}
         <div style={{ marginTop: '8px' }}>
           <button type="submit" disabled={submitting} className="submit-btn">
-             {submitting ? 'Streaming Relational 3NF Model Packets...' : 'Save Encounter Record (Offline-Safe)'}
+             {submitting ? 'Saving Encounter...' : 'Save Encounter Record'}
           </button>
         </div>
 

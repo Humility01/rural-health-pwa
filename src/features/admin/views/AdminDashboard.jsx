@@ -605,7 +605,7 @@ export default function AdminDashboard() {
           {facilityName} Management Panel
         </h2>
         <p style={{ fontSize: '13px', color: '#64748b', margin: 0, fontWeight: '600' }}>
-          📍 Clinic Location Node: <span style={{ color: '#004bf6' }}>{facilityLocation}</span> | Active 3NF Relational Operational Ledger
+          📍 Clinic Location Node: <span style={{ color: '#004bf6' }}>{facilityLocation}</span> 
         </p>
       </div>
 
