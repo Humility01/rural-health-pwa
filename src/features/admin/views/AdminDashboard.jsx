@@ -272,9 +272,35 @@ export default function AdminDashboard() {
       setLocalPatients(patientsArray);
       setLocalEncounters(compiledEncountersArray);
 
-      const allUsers = await localDb.users.toArray();
-      const filteredUsers = allUsers.filter(user => user.facility_id === resolvedId);
-      setSystemUsers(filteredUsers);
+// ✅ AFTER (Fetches from Supabase first, then falls back to LocalDB)
+let activeStaffList = [];
+
+if (supabaseLive && resolvedId) {
+  try {
+    const { data: cloudUsers, error: staffErr } = await supabaseLive
+      .from('users')
+      .select('*')
+      .eq('facility_id', resolvedId);
+
+    if (!staffErr && cloudUsers && cloudUsers.length > 0) {
+      // Save/update cloud staff into local IndexedDB for offline access
+      for (const u of cloudUsers) {
+        await localDb.users.put(u);
+      }
+      activeStaffList = cloudUsers;
+    }
+  } catch (netErr) {
+    console.warn("Could not fetch live staff list from cloud:", netErr);
+  }
+}
+
+// Fallback to local cache if offline or cloud returned nothing
+if (activeStaffList.length === 0) {
+  const allUsers = await localDb.users.toArray();
+  activeStaffList = allUsers.filter(user => user.facility_id === resolvedId);
+}
+
+setSystemUsers(activeStaffList);
       
     } catch (err) {
       console.error("Critical error hydrating administrative database collections:", err);

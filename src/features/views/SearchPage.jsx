@@ -277,30 +277,55 @@ export default function SearchPage() {
       // 🌐 CLOUD FALLBACK FOR CLINICAL VISITS & SUBSYSTEMS
       if ((!rawVisits || rawVisits.length === 0) && supabaseLive) {
         try {
-          const { data: cloudVisits, error: visitErr } = await supabaseLive
-            .from('visit')
+          // Attempt 1: Try 'clinical_visits' table
+          let { data: cloudVisits, error: visitErr } = await supabaseLive
+            .from('clinical_visits')
             .select('*')
             .eq('patient_id', patient.patient_id);
 
-          if (!visitErr && cloudVisits && cloudVisits.length > 0) {
+          // Attempt 2: Fallback to 'visit' table if 'clinical_visits' returns empty/error
+          if (visitErr || !cloudVisits || cloudVisits.length === 0) {
+            const fallbackRes = await supabaseLive
+              .from('visit')
+              .select('*')
+              .eq('patient_id', patient.patient_id);
+            if (!fallbackRes.error && fallbackRes.data) {
+              cloudVisits = fallbackRes.data;
+            }
+          }
+
+          if (cloudVisits && cloudVisits.length > 0) {
             const visitIds = cloudVisits.map(v => v.visit_id);
 
+            // Fetch subsystem details (handles plural and singular table naming variations)
             const [vitalsRes, complaintsRes, medsRes] = await Promise.all([
               supabaseLive.from('vitals').select('*').in('visit_id', visitIds),
-              supabaseLive.from('complaint').select('*').in('visit_id', visitIds),
-              supabaseLive.from('medication_dispensed').select('*').in('visit_id', visitIds)
+              supabaseLive.from('complaints').select('*').in('visit_id', visitIds),
+              supabaseLive.from('medications_dispensed').select('*').in('visit_id', visitIds)
             ]);
 
-            // Cache into Local DB
+            let complaintsData = complaintsRes.data;
+            if (!complaintsData) {
+              const cSingle = await supabaseLive.from('complaint').select('*').in('visit_id', visitIds);
+              complaintsData = cSingle.data || [];
+            }
+
+            let medsData = medsRes.data;
+            if (!medsData) {
+              const mSingle = await supabaseLive.from('medication_dispensed').select('*').in('visit_id', visitIds);
+              medsData = mSingle.data || [];
+            }
+
+            // Cache into Local IndexedDB
             for (const v of cloudVisits) await localDb.visit.put(v);
-            if (!vitalsRes.error && vitalsRes.data) {
+            if (vitalsRes.data) {
               for (const vit of vitalsRes.data) await localDb.vitals.put(vit);
             }
-            if (!complaintsRes.error && complaintsRes.data) {
-              for (const cmp of complaintsRes.data) await localDb.complaint.put(cmp);
+            if (complaintsData) {
+              for (const cmp of complaintsData) await localDb.complaint.put(cmp);
             }
-            if (!medsRes.error && medsRes.data) {
-              for (const med of medsRes.data) await localDb.medication_dispensed.put(med);
+            if (medsData) {
+              for (const med of medsData) await localDb.medication_dispensed.put(med);
             }
 
             rawVisits = cloudVisits;
