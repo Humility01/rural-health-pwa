@@ -5,7 +5,7 @@ import { localDb } from '../../../core/db/localDb';
 import { supabase } from '../../../core/supabase/client';
 const supabaseLive = supabase;
 
-// 🌟 CLEAN CARD BADGE COMPONENT (NO DOTS)
+// 🌟 CLEAN BADGE COMPONENT (NO DOTS)
 const CardBadge = ({ children, bg }) => (
   <div style={{
     width: '40px',
@@ -22,7 +22,7 @@ const CardBadge = ({ children, bg }) => (
   </div>
 );
 
-// 👤 EXACT PATIENT USER OUTLINE ICON
+// 👤 PATIENT USER OUTLINE ICON
 const PatientUserIcon = ({ color = "#004bf6" }) => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
@@ -46,7 +46,7 @@ export default function AdminDashboard() {
   const [localEncounters, setLocalEncounters] = useState([]);
   const [localOutboxRows, setLocalOutboxRows] = useState([]); 
 
-  // --- 🌟 Periodic Analytical Breakdown States (Includes Year Metric) ---
+  // --- Periodic Analytical Breakdown States ---
   const [patientStats, setPatientStats] = useState({ today: 0, week: 0, month: 0, year: 0, total: 0, updated: 0 });
   const [visitStats, setVisitStats] = useState({ today: 0, week: 0, month: 0, total: 0 });
   
@@ -76,12 +76,6 @@ export default function AdminDashboard() {
 
   const refreshAdminDashboardCore = async () => {
     try {
-      const encounterCount = await localDb.visit.count();
-      const pendingSyncCount = await localDb.sync_outbox.where('synced').equals(0).count();
-
-      setEncounterLogsCount(encounterCount);
-      setOutboxCount(pendingSyncCount);
-
       let resolvedName = "Futminna Healthcare";
       let resolvedLocation = "Minna, Niger State, Nigeria";
       let resolvedId = currentFacilityId;
@@ -157,16 +151,62 @@ export default function AdminDashboard() {
       setFacilityName(resolvedName);
       setFacilityLocation(resolvedLocation);
 
+      // --- 🌐 CLOUD FALLBACK HYDRATION FOR PATIENTS & CLINICAL VISITS ---
+      if (supabaseLive && resolvedId) {
+        try {
+          // 1. Fetch Patients from Supabase
+          const { data: cloudPatients } = await supabaseLive
+            .from('patients')
+            .select('*')
+            .eq('facility_id', resolvedId);
+
+          if (cloudPatients && cloudPatients.length > 0) {
+            for (const cp of cloudPatients) {
+              await localDb.patients.put(cp);
+            }
+          }
+
+          // 2. Fetch Visits from Supabase
+          const { data: cloudVisits } = await supabaseLive
+            .from('visit')
+            .select('*');
+
+          if (cloudVisits && cloudVisits.length > 0) {
+            const visitIds = cloudVisits.map(v => v.visit_id);
+
+            const [vitalsRes, complaintsRes, examRes, medsRes] = await Promise.all([
+              supabaseLive.from('vitals').select('*').in('visit_id', visitIds),
+              supabaseLive.from('complaint').select('*').in('visit_id', visitIds),
+              supabaseLive.from('examination').select('*').in('visit_id', visitIds),
+              supabaseLive.from('medication_dispensed').select('*').in('visit_id', visitIds)
+            ]);
+
+            for (const v of cloudVisits) await localDb.visit.put(v);
+            if (vitalsRes.data) for (const vit of vitalsRes.data) await localDb.vitals.put(vit);
+            if (complaintsRes.data) for (const cmp of complaintsRes.data) await localDb.complaint.put(cmp);
+            if (examRes.data) for (const ex of examRes.data) await localDb.examination.put(ex);
+            if (medsRes.data) for (const med of medsRes.data) await localDb.medication_dispensed.put(med);
+          }
+        } catch (cloudSyncErr) {
+          console.warn("Cloud fallback hydration bypassed:", cloudSyncErr);
+        }
+      }
+
+      // --- HYDRATE METRICS FROM LOCAL DB (NOW FULLY SYNCHRONIZED) ---
       const allPatientsArray = await localDb.patients.toArray();
       const patientsArray = allPatientsArray.filter(p => p.facility_id === resolvedId);
-      
       setCachedProfilesCount(patientsArray.length);
 
       const rawVisitsArray = await localDb.visit.toArray();
+      setEncounterLogsCount(rawVisitsArray.length);
+
+      const pendingSyncCount = await localDb.sync_outbox.where('synced').equals(0).count();
+      setOutboxCount(pendingSyncCount);
+
       const outboxArray = await localDb.sync_outbox.where('synced').equals(0).toArray();
       setLocalOutboxRows(outboxArray);
 
-      // --- DATE RANGE CALCULATIONS ---
+      // --- DATE RANGE STATS CALCULATIONS ---
       const now = new Date();
       const todayStr = now.toISOString().split('T')[0];
       
@@ -224,7 +264,7 @@ export default function AdminDashboard() {
           return {
             ...v,
             presenting_complaint: complaintRow?.symptom || 'General Consultation',
-            diagnosis_notes: examinationRow?.diagnosis_notes || 'Pending'
+            diagnosis_notes: examinationRow?.diagnosis_notes || 'Review'
           };
         })
       );
@@ -520,7 +560,7 @@ export default function AdminDashboard() {
       await localDb.sync_outbox.clear();
       await localDb.patients.clear(); 
       
-      setAdminStatus({ text: 'Cache Cleared! Local client 3NF tables completely flushed.', type: 'SUCCESS' });
+      setAdminStatus({ text: 'Cache Cleared! Local client tables completely flushed.', type: 'SUCCESS' });
       refreshAdminDashboardCore();
     } catch (err) { 
       setAdminStatus({ text: 'Failure dropping database blocks.', type: 'ERROR' }); 
@@ -605,7 +645,7 @@ export default function AdminDashboard() {
           {facilityName} Management Panel
         </h2>
         <p style={{ fontSize: '13px', color: '#64748b', margin: 0, fontWeight: '600' }}>
-          📍 Clinic Location Node: <span style={{ color: '#004bf6' }}>{facilityLocation}</span> 
+          📍 Clinic Location Node: <span style={{ color: '#004bf6' }}>{facilityLocation}</span>
         </p>
       </div>
 
@@ -664,12 +704,11 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* --- SECTION 2: PATIENT REGISTRATION BREAKDOWN (INCLUDES REGISTERED THIS YEAR) --- */}
+      {/* --- SECTION 2: PATIENT REGISTRATION BREAKDOWN --- */}
       <div>
         <h3 className="section-title"><span>👥</span> PATIENT REGISTRATION BREAKDOWN</h3>
         <div className="metrics-grid-5">
           
-          {/* 1. Today */}
           <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
             <CardBadge bg="#eff6ff">
               <PatientUserIcon color="#004bf6" />
@@ -680,7 +719,6 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* 2. This Week */}
           <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
             <CardBadge bg="#eff6ff">
               <PatientUserIcon color="#004bf6" />
@@ -691,7 +729,6 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* 3. This Month */}
           <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
             <CardBadge bg="#eff6ff">
               <PatientUserIcon color="#004bf6" />
@@ -702,7 +739,6 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* 4. This Year 🌟 NEW */}
           <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
             <CardBadge bg="#eff6ff">
               <PatientUserIcon color="#004bf6" />
@@ -713,7 +749,6 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* 5. Profiles Updated */}
           <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}>
             <CardBadge bg="#eff6ff">
               <PatientUserIcon color="#004bf6" />
@@ -1074,7 +1109,7 @@ export default function AdminDashboard() {
                   ) : (
                     localOutboxRows.map((row) => (
                       <tr key={row.outbox_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '14px 16px', fontFamily: 'monospace', color: '#64748b' }}>{row.outbox_id.substring(0, 8)}...</td>
+                        <td style={{ padding: '14px 16px', fontFamily: 'monospace', color: '#64748b' }}>{String(row.outbox_id).substring(0, 8)}...</td>
                         <td style={{ padding: '14px 16px', fontWeight: '700', color: '#0f172a', textTransform: 'uppercase' }}>{row.table_name}</td>
                         <td style={{ padding: '14px 16px' }}>
                           <span style={{ 

@@ -268,11 +268,47 @@ export default function SearchPage() {
     });
 
     try {
-      // 1. Fetch Clinical Encounters
-      const rawVisits = await localDb.visit
+      // 1. Fetch Clinical Encounters (Local Check)
+      let rawVisits = await localDb.visit
         .where('patient_id')
         .equals(patient.patient_id)
         .toArray();
+
+      // 🌐 CLOUD FALLBACK FOR CLINICAL VISITS & SUBSYSTEMS
+      if ((!rawVisits || rawVisits.length === 0) && supabaseLive) {
+        try {
+          const { data: cloudVisits, error: visitErr } = await supabaseLive
+            .from('visit')
+            .select('*')
+            .eq('patient_id', patient.patient_id);
+
+          if (!visitErr && cloudVisits && cloudVisits.length > 0) {
+            const visitIds = cloudVisits.map(v => v.visit_id);
+
+            const [vitalsRes, complaintsRes, medsRes] = await Promise.all([
+              supabaseLive.from('vitals').select('*').in('visit_id', visitIds),
+              supabaseLive.from('complaint').select('*').in('visit_id', visitIds),
+              supabaseLive.from('medication_dispensed').select('*').in('visit_id', visitIds)
+            ]);
+
+            // Cache into Local DB
+            for (const v of cloudVisits) await localDb.visit.put(v);
+            if (!vitalsRes.error && vitalsRes.data) {
+              for (const vit of vitalsRes.data) await localDb.vitals.put(vit);
+            }
+            if (!complaintsRes.error && complaintsRes.data) {
+              for (const cmp of complaintsRes.data) await localDb.complaint.put(cmp);
+            }
+            if (!medsRes.error && medsRes.data) {
+              for (const med of medsRes.data) await localDb.medication_dispensed.put(med);
+            }
+
+            rawVisits = cloudVisits;
+          }
+        } catch (netErr) {
+          console.warn("Cloud encounters fetch bypassed:", netErr);
+        }
+      }
 
       if (rawVisits && rawVisits.length > 0) {
         rawVisits.sort((a, b) => new Date(b.visit_date || b.created_at) - new Date(a.visit_date || a.created_at));
