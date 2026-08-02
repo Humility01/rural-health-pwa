@@ -871,49 +871,63 @@ setSystemUsers(activeStaffList);
             </form>
           </div>
 
-          {/* ACTIVE STAFF REGISTRY BLOCK */}
-          <div className="panel-card">
-            <h3 style={{ margin: '0 0 14px 0', fontSize: '14px', fontWeight: '800', color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                Active System Operators Registry
-            </h3>
-            <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569' }}>
-                    <th style={{ padding: '12px 14px', textAlign: 'left', fontWeight: '700' }}>Operator Email</th>
-                    <th style={{ padding: '12px 14px', textAlign: 'center', fontWeight: '700' }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {systemUsers.map((user) => {
-                    const isTrueSuperAdmin = user.role === 'SUPER_ADMIN';
-                    return (
-                      <tr key={user.user_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '12px 14px', fontWeight: '600', color: '#0f172a' }}>
-                          {user.email}
-                          <span style={{ display: 'block', fontSize: '10px', color: '#64748b', marginTop: '3px', fontWeight: '700' }}>{user.role}</span>
-                        </td>
-                        <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                          {isTrueSuperAdmin ? (
-                            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', padding: '4px 8px', background: '#f1f5f9', borderRadius: '6px', border: '1px solid #cbd5e1', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                               🔒 Root
-                            </span>
-                          ) : (
-                            <button 
-                              onClick={() => handleDeleteUser(user.user_id, user.email, user.role)} 
-                              style={{ padding: '6px 12px', background: '#ffffff', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '4px', transition: 'all 0.2s ease' }}
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+{/* ACTIVE STAFF REGISTRY BLOCK */}
+<div className="panel-card">
+  <h3 style={{ margin: '0 0 14px 0', fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>
+      Active System Operators Registry
+  </h3>
+  <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden', overflowX: 'auto' }}>
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', whiteSpace: 'nowrap' }}>
+      <thead>
+        <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569' }}>
+          <th style={{ padding: '12px 14px', textAlign: 'left', fontWeight: '700' }}>Operator Email / Role</th>
+          <th style={{ padding: '12px 14px', textAlign: 'left', fontWeight: '700' }}>Facility Node</th>
+          <th style={{ padding: '12px 14px', textAlign: 'center', fontWeight: '700' }}>Created Date</th>
+          <th style={{ padding: '12px 14px', textAlign: 'center', fontWeight: '700' }}>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {systemUsers.map((user) => {
+          const isTrueSuperAdmin = user.role === 'SUPER_ADMIN';
+          const createdDateStr = user.created_at 
+            ? new Date(user.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+            : 'N/A';
+
+          return (
+            <tr key={user.user_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+              <td style={{ padding: '12px 14px', fontWeight: '600', color: '#0f172a' }}>
+                {user.email}
+                <span style={{ display: 'block', fontSize: '10px', color: '#64748b', marginTop: '3px', fontWeight: '700' }}>
+                  {user.role}
+                </span>
+              </td>
+              <td style={{ padding: '12px 14px', color: '#334155', fontWeight: '500' }}>
+                {facilityName}
+              </td>
+              <td style={{ padding: '12px 14px', textAlign: 'center', color: '#64748b', fontWeight: '500', fontSize: '12px' }}>
+                {createdDateStr}
+              </td>
+              <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                {isTrueSuperAdmin ? (
+                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', padding: '4px 8px', background: '#f1f5f9', borderRadius: '6px', border: '1px solid #cbd5e1', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                     🔒 Root
+                  </span>
+                ) : (
+                  <button 
+                    onClick={() => handleDeleteUser(user.user_id, user.email, user.role)} 
+                    style={{ padding: '6px 12px', background: '#ffffff', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '8px', cursor: 'pointer', fontSize: '12px', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '4px', transition: 'all 0.2s ease' }}
+                  >
+                    Delete
+                  </button>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+</div>
 
           {/* EMERGENCY PURGE */}
           <div className="panel-card" style={{ background: '#fff1f2', border: '1px solid #ffe4e6', display: 'flex', flexDirection: 'column', gap: '12px' }}>
